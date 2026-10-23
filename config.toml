@@ -1,0 +1,27 @@
+[entrada]
+archivo = 'cuentas.csv'          # también por --input
+columna = 'id_cuenta'
+codificacion = 'utf-8-sig'
+
+[api]
+url_base = 'https://jsonplaceholder.typicode.com/posts'
+timeout_conexion_s = 5
+timeout_lectura_s = 10
+pausa_entre_consultas_s = 0
+
+[reintentos]
+max_intentos = 4
+espera_base_s = 1.0
+factor = 2.0
+espera_maxima_s = 30.0
+retry_after_maximo_s = 60.0
+
+[salida]
+carpeta = 'salida'
+base_datos = 'estado/estado.db'
+
+[log]
+archivo = 'logs/proceso.log'
+nivel = 'INFO'
+max_bytes = 5242880
+copias = 5
