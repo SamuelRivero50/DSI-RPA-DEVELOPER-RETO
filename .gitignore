@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Proyecto
+estado/
+salida/
+logs/
+*.db
+*.db-wal
+*.db-shm
