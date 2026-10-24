@@ -6,23 +6,24 @@ from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.properties import PageSetupProperties
 
 from cuentas_pipeline.core.config import SalidaConfig
 from cuentas_pipeline.core.models import Estado
 
 _COLUMNAS = [
-    "linea_origen",
-    "valor_original",
-    "id_cuenta",
-    "estado",
-    "causa",
-    "apariciones",
-    "user_id",
-    "titulo",
-    "cuerpo",
-    "intentos",
-    "detalle_error",
-    "consultado_en",
+    "Línea origen",
+    "Valor original",
+    "ID cuenta",
+    "Estado",
+    "Causa",
+    "Apariciones",
+    "Intentos",
+    "Detalle del error",
+    "Consultado en",
+    "ID usuario",
+    "Título",
+    "Cuerpo",
 ]
 
 _PREFIJOS_FORMULA = ("=", "+", "-", "@")
@@ -37,6 +38,13 @@ _RELLENOS = {
     Estado.PENDIENTE.value: "D9D9D9",
 }
 
+_RELLENOS_SUAVES = {
+    Estado.NO_ENCONTRADO.value: "FFF2CC",
+    Estado.DATO_INVALIDO.value: "FCE4D6",
+    Estado.ERROR_TECNICO.value: "FFE6E6",
+    Estado.PENDIENTE.value: "F2F2F2",
+}
+
 _COLOR_BANDA = "404040"
 _COLOR_TEXTO_SECUNDARIO = "808080"
 _LADO_FINO = Side(style="thin", color="BFBFBF")
@@ -48,7 +56,11 @@ _BORDE_TOTAL = Border(
     bottom=_LADO_FINO,
 )
 
-_ANCHOS = [14, 18, 12, 18, 18, 12, 10, 30, 50, 10, 40, 26]
+_ANCHOS = [12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40, 70]
+
+_COLUMNAS_CENTRADAS = {1, 3, 6, 7, 10}
+_ALINEACION_CENTRO = Alignment(horizontal="center", vertical="center")
+_ALINEACION_IZQUIERDA = Alignment(horizontal="left", vertical="center")
 
 _ORDEN_ESTADOS = (
     Estado.OK,
@@ -76,12 +88,12 @@ def _valores(fila: dict[str, object]) -> list[object]:
         estado,
         fila["causa"],
         fila["apariciones"],
+        fila["intentos"],
+        fila["detalle_error"],
+        _formatear_fecha(str(fila["actualizado_en"])),
         fila["user_id"],
         fila["titulo"],
         fila["cuerpo"],
-        fila["intentos"],
-        fila["detalle_error"],
-        fila["actualizado_en"],
     ]
 
 
@@ -139,6 +151,13 @@ def _formatear_fecha(valor: str) -> str:
         return datetime.fromisoformat(valor).strftime("%Y-%m-%d %H:%M:%S")
     except ValueError:
         return valor
+
+
+def _aplicar_alineacion(celda, indice: int) -> None:
+    if indice in _COLUMNAS_CENTRADAS:
+        celda.alignment = _ALINEACION_CENTRO
+    else:
+        celda.alignment = _ALINEACION_IZQUIERDA
 
 
 def _conteos_por_estado(filas: list[dict[str, object]]) -> dict[str, int]:
@@ -336,24 +355,38 @@ class ExcelWriter:
             hoja = libro.active
             hoja.title = "Resultados"
             hoja.append(_COLUMNAS)
+            hoja.row_dimensions[1].height = 28
             for celda in hoja[1]:
-                celda.font = _fuente(negrita=True)
+                celda.font = _fuente(negrita=True, color="FFFFFF")
+                celda.fill = _relleno(_COLOR_BANDA)
+                celda.alignment = Alignment(
+                    horizontal="center", vertical="center", wrap_text=True
+                )
 
             for fila in filas:
+                estado = str(fila["estado"])
                 hoja.append(_valores(fila))
-                relleno = _relleno(_RELLENOS[str(fila["estado"])])
-                for celda in hoja[hoja.max_row]:
+                hoja.row_dimensions[hoja.max_row].height = 20
+                relleno_suave = _RELLENOS_SUAVES.get(estado)
+                for indice, celda in enumerate(hoja[hoja.max_row], start=1):
                     _proteger_texto(celda)
-                    celda.fill = relleno
-                hoja.cell(row=hoja.max_row, column=9).alignment = Alignment(
-                    wrap_text=True, vertical="top"
+                    _aplicar_alineacion(celda, indice)
+                    if relleno_suave is not None:
+                        celda.fill = _relleno(relleno_suave)
+                hoja.cell(row=hoja.max_row, column=4).fill = _relleno(
+                    _RELLENOS[estado]
                 )
 
             for indice, ancho in enumerate(_ANCHOS, start=1):
                 hoja.column_dimensions[get_column_letter(indice)].width = ancho
 
-            hoja.freeze_panes = "A2"
+            hoja.freeze_panes = "D2"
             hoja.auto_filter.ref = f"A1:L{hoja.max_row}"
+            hoja.page_setup.orientation = "landscape"
+            hoja.page_setup.fitToWidth = 1
+            hoja.page_setup.fitToHeight = 0
+            hoja.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+            hoja.print_title_rows = "1:1"
 
             _escribir_resumen(
                 libro,
@@ -364,6 +397,7 @@ class ExcelWriter:
                 datetime.now().astimezone().isoformat(timespec="seconds"),
             )
 
+            libro.active = 0
             libro.save(temporal)
             os.replace(temporal, ruta)
         finally:

@@ -1,3 +1,4 @@
+import re
 from dataclasses import replace
 from pathlib import Path
 
@@ -282,18 +283,18 @@ def test_el_excel_tiene_una_fila_por_id_unico(tmp_path):
     assert hoja.max_row == 18
     assert hoja.max_column == 12
     assert [celda.value for celda in hoja[1]] == [
-        "linea_origen",
-        "valor_original",
-        "id_cuenta",
-        "estado",
-        "causa",
-        "apariciones",
-        "user_id",
-        "titulo",
-        "cuerpo",
-        "intentos",
-        "detalle_error",
-        "consultado_en",
+        "Línea origen",
+        "Valor original",
+        "ID cuenta",
+        "Estado",
+        "Causa",
+        "Apariciones",
+        "Intentos",
+        "Detalle del error",
+        "Consultado en",
+        "ID usuario",
+        "Título",
+        "Cuerpo",
     ]
 
     por_id = {fila[2].value: fila for fila in hoja.iter_rows(min_row=2)}
@@ -301,7 +302,8 @@ def test_el_excel_tiene_una_fila_por_id_unico(tmp_path):
     assert por_id[7][1].value == "7"
     assert por_id[7][3].value == "OK"
     assert por_id[7][5].value == 3
-    assert por_id[7][7].value == "titulo 7"
+    assert por_id[7][10].value == "titulo 7"
+    assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", por_id[7][8].value)
     assert por_id[23][1].value == " 23"
     assert por_id[101][3].value == "NO_ENCONTRADO"
     assert por_id[101][4].value == "HTTP_404"
@@ -347,10 +349,10 @@ def test_el_texto_con_prefijo_de_formula_se_escribe_como_texto(tmp_path):
 
     hoja = load_workbook(resumen.ruta_excel)["Resultados"]
     por_id = {fila[2].value: fila for fila in hoja.iter_rows(min_row=2)}
-    assert por_id[7][7].value == "=2+2"
-    assert por_id[7][7].data_type == "s"
-    assert por_id[7][8].value == "@hola"
-    assert por_id[7][8].data_type == "s"
+    assert por_id[7][10].value == "=2+2"
+    assert por_id[7][10].data_type == "s"
+    assert por_id[7][11].value == "@hola"
+    assert por_id[7][11].data_type == "s"
     assert por_id[None][1].value == "=cmd"
     assert por_id[None][1].data_type == "s"
     repo.cerrar()
@@ -365,7 +367,7 @@ def test_el_excel_tiene_formato_y_color_por_estado(tmp_path):
             return RespuestaFalsa(404)
         if id_cuenta == "8":
             raise ValueError("bug")
-        return RespuestaFalsa(200, {"id": 7, "title": "titulo", "body": "cuerpo"})
+        return RespuestaFalsa(200, {"userId": 1, "id": 7, "title": "titulo", "body": "cuerpo"})
 
     repo = Repositorio(config.salida)
     resumen = ejecutar(
@@ -379,16 +381,92 @@ def test_el_excel_tiene_formato_y_color_por_estado(tmp_path):
 
     libro = load_workbook(resumen.ruta_excel)
     hoja = libro["Resultados"]
-    assert hoja.freeze_panes == "A2"
+    assert libro.active.title == "Resultados"
+    assert hoja.freeze_panes == "D2"
     assert hoja.auto_filter.ref == f"A1:L{hoja.max_row}"
-    assert hoja["A1"].font.bold
+    assert hoja.page_setup.orientation == "landscape"
+    assert hoja.page_setup.fitToWidth == 1
+    assert hoja.page_setup.fitToHeight == 0
+    assert hoja.sheet_properties.pageSetUpPr.fitToPage is True
+    assert hoja.print_title_rows == "$1:$1"
+
+    assert hoja.row_dimensions[1].height == 28
+    for celda in hoja[1]:
+        assert celda.font.bold
+        assert celda.font.color.rgb.endswith("FFFFFF")
+        assert celda.fill.fgColor.rgb.endswith("404040")
+        assert celda.alignment.horizontal == "center"
+        assert celda.alignment.vertical == "center"
+        assert celda.alignment.wrap_text
+
+    anchos = [12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40, 70]
+    for indice, ancho in enumerate(anchos, start=1):
+        assert hoja.column_dimensions[chr(64 + indice)].width == ancho
+
     por_id = {fila[2].value: fila for fila in hoja.iter_rows(min_row=2)}
-    assert por_id[7][8].alignment.wrap_text
-    assert por_id[7][0].fill.fgColor.rgb.endswith("C6EFCE")
-    assert por_id[101][0].fill.fgColor.rgb.endswith("FFEB9C")
-    assert por_id[8][0].fill.fgColor.rgb.endswith("FFC7CE")
-    assert por_id[None][0].fill.fgColor.rgb.endswith("F8CBAD")
+    assert hoja.row_dimensions[2].height == 20
+    fila_ok = por_id[7]
+    for indice in [0, 2, 5, 6, 9]:
+        assert fila_ok[indice].alignment.horizontal == "center"
+        assert fila_ok[indice].alignment.vertical == "center"
+    for indice in [1, 3, 4, 7, 8, 10, 11]:
+        assert fila_ok[indice].alignment.horizontal == "left"
+        assert fila_ok[indice].alignment.vertical == "center"
+    assert not fila_ok[10].alignment.wrap_text
+    assert not fila_ok[11].alignment.wrap_text
+    assert fila_ok[0].fill.fill_type is None
+    assert fila_ok[3].fill.fgColor.rgb.endswith("C6EFCE")
+
+    fila_no_encontrado = por_id[101]
+    assert fila_no_encontrado[3].fill.fgColor.rgb.endswith("FFEB9C")
+    assert fila_no_encontrado[0].fill.fgColor.rgb.endswith("FFF2CC")
+
+    fila_error = por_id[8]
+    assert fila_error[3].fill.fgColor.rgb.endswith("FFC7CE")
+    assert fila_error[0].fill.fgColor.rgb.endswith("FFE6E6")
+
+    fila_invalida = por_id[None]
+    assert fila_invalida[3].fill.fgColor.rgb.endswith("F8CBAD")
+    assert fila_invalida[0].fill.fgColor.rgb.endswith("FCE4D6")
+
+    assert isinstance(fila_ok[0].value, int)
+    assert isinstance(fila_ok[2].value, int)
+    assert isinstance(fila_ok[5].value, int)
+    assert isinstance(fila_ok[6].value, int)
+    assert isinstance(fila_ok[9].value, int)
+    assert isinstance(fila_ok[1].value, str)
     assert _valor_resumen(libro["Resumen"], "ERROR_INESPERADO") == 1
+    repo.cerrar()
+
+
+def test_los_encabezados_de_resultados_tienen_el_orden_esperado(tmp_path):
+    config = _config(tmp_path)
+    lectura = _lectura([(2, "7")])
+    repo = Repositorio(config.salida)
+    resumen = ejecutar(
+        lectura,
+        config,
+        repo,
+        ClienteFalso(lambda id_cuenta: _respuesta_ok(id_cuenta)),
+        escritor=ExcelWriter(config.salida),
+        sleep=lambda _segundos: None,
+    )
+
+    hoja = load_workbook(resumen.ruta_excel)["Resultados"]
+    assert [celda.value for celda in hoja[1]] == [
+        "Línea origen",
+        "Valor original",
+        "ID cuenta",
+        "Estado",
+        "Causa",
+        "Apariciones",
+        "Intentos",
+        "Detalle del error",
+        "Consultado en",
+        "ID usuario",
+        "Título",
+        "Cuerpo",
+    ]
     repo.cerrar()
 
 
