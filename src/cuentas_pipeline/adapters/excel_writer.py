@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from cuentas_pipeline.core.config import SalidaConfig
 from cuentas_pipeline.core.models import Estado
@@ -24,6 +26,16 @@ _COLUMNAS = [
 ]
 
 _PREFIJOS_FORMULA = ("=", "+", "-", "@")
+
+_RELLENOS = {
+    Estado.OK.value: "C6EFCE",
+    Estado.NO_ENCONTRADO.value: "FFEB9C",
+    Estado.DATO_INVALIDO.value: "F8CBAD",
+    Estado.ERROR_TECNICO.value: "FFC7CE",
+    Estado.PENDIENTE.value: "D9D9D9",
+}
+
+_ANCHOS = [14, 18, 12, 18, 18, 12, 10, 30, 50, 10, 40, 26]
 
 
 def _fecha_archivo(filas: list[dict[str, object]]) -> str:
@@ -85,10 +97,28 @@ class ExcelWriter:
             hoja = libro.active
             hoja.title = "Resultados"
             hoja.append(_COLUMNAS)
+            for celda in hoja[1]:
+                celda.font = Font(bold=True)
+
             for fila in filas:
                 hoja.append(_valores(fila))
+                relleno = PatternFill(
+                    fill_type="solid",
+                    start_color=_RELLENOS[str(fila["estado"])],
+                    end_color=_RELLENOS[str(fila["estado"])],
+                )
                 for celda in hoja[hoja.max_row]:
                     _proteger_texto(celda)
+                    celda.fill = relleno
+                hoja.cell(row=hoja.max_row, column=9).alignment = Alignment(
+                    wrap_text=True, vertical="top"
+                )
+
+            for indice, ancho in enumerate(_ANCHOS, start=1):
+                hoja.column_dimensions[get_column_letter(indice)].width = ancho
+
+            hoja.freeze_panes = "A2"
+            hoja.auto_filter.ref = f"A1:L{hoja.max_row}"
 
             libro.save(temporal)
             os.replace(temporal, ruta)

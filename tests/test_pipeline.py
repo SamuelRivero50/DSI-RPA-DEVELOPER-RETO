@@ -329,3 +329,37 @@ def test_el_texto_con_prefijo_de_formula_se_escribe_como_texto(tmp_path):
     assert por_id[None][1].value == "=cmd"
     assert por_id[None][1].data_type == "s"
     repo.cerrar()
+
+
+def test_el_excel_tiene_formato_y_color_por_estado(tmp_path):
+    config = _config(tmp_path)
+    lectura = _lectura([(2, "7"), (3, "101"), (4, "8"), (5, "abc")])
+
+    def responder(id_cuenta):
+        if id_cuenta == "101":
+            return RespuestaFalsa(404)
+        if id_cuenta == "8":
+            raise ValueError("bug")
+        return RespuestaFalsa(200, {"id": 7, "title": "titulo", "body": "cuerpo"})
+
+    repo = Repositorio(config.salida)
+    resumen = ejecutar(
+        lectura,
+        config,
+        repo,
+        ClienteFalso(responder),
+        escritor=ExcelWriter(config.salida),
+        sleep=lambda _segundos: None,
+    )
+
+    hoja = load_workbook(resumen.ruta_excel)["Resultados"]
+    assert hoja.freeze_panes == "A2"
+    assert hoja.auto_filter.ref == f"A1:L{hoja.max_row}"
+    assert hoja["A1"].font.bold
+    por_id = {fila[2].value: fila for fila in hoja.iter_rows(min_row=2)}
+    assert por_id[7][8].alignment.wrap_text
+    assert por_id[7][0].fill.fgColor.rgb.endswith("C6EFCE")
+    assert por_id[101][0].fill.fgColor.rgb.endswith("FFEB9C")
+    assert por_id[8][0].fill.fgColor.rgb.endswith("FFC7CE")
+    assert por_id[None][0].fill.fgColor.rgb.endswith("F8CBAD")
+    repo.cerrar()
