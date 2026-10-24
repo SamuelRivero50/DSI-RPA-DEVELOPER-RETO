@@ -76,11 +76,7 @@ def main(argv: list[str] | None = None) -> int:
             repo.cerrar()
 
         codigo = codigo_salida(resumen)
-        logger.info(
-            "estado=%s codigo_salida=%d",
-            {estado.value: total for estado, total in resumen.por_estado.items()},
-            codigo,
-        )
+        logger.info("codigo_salida=%d", codigo)
         return codigo
     except Exception:
         logger.exception("error fatal")

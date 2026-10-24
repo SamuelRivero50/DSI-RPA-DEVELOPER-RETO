@@ -5,6 +5,7 @@ from cuentas_pipeline.core.config import Config
 from cuentas_pipeline.core.models import Causa, Estado, Resultado, ResumenEjecucion
 from cuentas_pipeline.steps.normalize import normalizar
 from cuentas_pipeline.steps.resolve import resolver
+from cuentas_pipeline.steps.summary import formatear
 
 logger = logging.getLogger(__name__)
 
@@ -117,12 +118,5 @@ def ejecutar(
         duracion_s=time.monotonic() - inicio,
         ruta_excel=ruta_excel,
     )
-    logger.info(
-        "fin archivo=%s hash8=%s consultados=%d reutilizados=%d reintentos=%d",
-        lectura.nombre,
-        lectura.hash8,
-        consultados,
-        reutilizados,
-        reintentos_totales,
-    )
+    logger.info("resumen\n%s", formatear(resumen))
     return resumen
