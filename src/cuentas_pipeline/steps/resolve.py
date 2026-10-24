@@ -107,9 +107,9 @@ def _retry_after(respuesta, config: ReintentosConfig) -> float | None:
             fecha = fecha.replace(tzinfo=UTC)
         segundos = (fecha - datetime.now(UTC)).total_seconds()
 
-    if not math.isfinite(segundos):
+    if not math.isfinite(segundos) or segundos < 0:
         return None
-    return min(max(segundos, 0.0), config.retry_after_maximo_s)
+    return min(segundos, config.retry_after_maximo_s)
 
 
 def resolver(

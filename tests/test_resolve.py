@@ -235,6 +235,17 @@ def test_retry_after_acepta_fecha_http():
     assert 8.0 <= esperas[0] <= 10.0
 
 
+def test_retry_after_negativo_se_ignora_y_usa_la_espera_exponencial():
+    cliente = ClienteFalso(
+        [RespuestaFalsa(429, headers={"Retry-After": "-5"}), RespuestaFalsa(200, {"id": 42})]
+    )
+
+    resultado, esperas = _resolver(cliente)
+
+    assert resultado.estado is Estado.OK
+    assert esperas == [1.0]
+
+
 def test_retry_after_invalido_usa_la_espera_exponencial():
     cliente = ClienteFalso(
         [RespuestaFalsa(429, headers={"Retry-After": "luego"}), RespuestaFalsa(200, {"id": 42})]
