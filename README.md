@@ -4,7 +4,7 @@ Proceso desatendido de madrugada que lee el CSV diario de cuentas médicas, cons
 
 Flujo en una línea: **CSV → SHA-256 → normalización y deduplicación → estado en SQLite → consulta a la API con reintentos → Excel → resumen en consola y log**.
 
-Las decisiones, los prompts usados y los errores detectados durante el desarrollo están en [BITACORA.md](BITACORA.md).
+Una ejecución es cada vez que se lanza el programa. Las decisiones, los prompts usados y los errores detectados durante el desarrollo están en [BITACORA.md](BITACORA.md).
 
 Con `cuentas.csv` el resultado esperado es: 20 líneas con datos, 1 línea en blanco, 17 ids únicos, 3 repeticiones ignoradas (`7` ×3 y `12` ×2), 13 `OK`, 3 `NO_ENCONTRADO` (`0`, `101` y `150`), 1 `DATO_INVALIDO` y salida `0`.
 
@@ -18,22 +18,26 @@ Con `cuentas.csv` el resultado esperado es: 20 líneas con datos, 1 línea en bl
 
 ## Instalación
 
+Linux / macOS:
+
 ```bash
-python -m venv .venv
-
-# Linux / macOS
+python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install -e ".[dev]"
+```
 
-# Windows PowerShell
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
 .venv\Scripts\Activate.ps1
-
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 Para una instalación solo de ejecución:
 
 ```bash
-pip install -e .
+python -m pip install -e .
 ```
 
 Comprobar que la CLI responde:
@@ -99,32 +103,37 @@ El proceso es secuencial. La pausa configurada se aplica entre ids pendientes, n
 
 Se escribe siempre al final de la ejecución, aunque queden pendientes, en `salida/consolidado_<YYYY-MM-DD>_<hash8>.xlsx`. La fecha es la de la primera carga del archivo (`MIN(creado_en)`) y `hash8` son los primeros ocho caracteres del SHA-256 del contenido. El archivo se escribe en un temporal de la misma carpeta y se reemplaza con `os.replace`, de modo que nunca queda un Excel a medias.
 
-Hoja `Resultados`, una fila por id único y ordenada por línea de origen:
+En Windows el Excel de destino debe estar cerrado al ejecutar. Si está abierto, `os.replace` no puede reemplazarlo: la ejecución termina con código `2` y el estado ya confirmado en SQLite no se pierde; al cerrarlo y relanzar se regenera el Excel (comportamiento esperado en Windows; no verificado en el entorno Linux de desarrollo).
 
-| Columna | Contenido |
-| --- | --- |
-| `linea_origen` | Línea del CSV (la cabecera es la 1). |
-| `valor_original` | Texto tal como lo entrega el parser. |
-| `id_cuenta` | Entero si el id es válido; vacío si es inválido. |
-| `estado` | `PENDIENTE`, `OK`, `NO_ENCONTRADO`, `DATO_INVALIDO` o `ERROR_TECNICO`. |
-| `causa` | Causa del estado, cuando aplica. |
-| `apariciones` | Veces que aparece el id en el CSV. |
-| `user_id` | `userId` de la API. |
-| `titulo` | `title` de la API. |
-| `cuerpo` | `body` de la API, con ajuste de línea. |
-| `intentos` | Peticiones HTTP realizadas para ese id. |
-| `detalle_error` | Detalle técnico, cuando aplica. |
-| `consultado_en` | Última actualización del registro, en ISO-8601 con zona horaria. |
+Hoja `Resultados`, una fila por id único y ordenada por línea de origen. El orden real de columnas y encabezados visibles es:
 
-La hoja tiene encabezado en negrita, fila congelada, autofiltro, anchos razonables y relleno por estado: verde claro para `OK`, amarillo para `NO_ENCONTRADO`, naranja para `DATO_INVALIDO`, rojo claro para `ERROR_TECNICO` y gris para `PENDIENTE`. Todo texto de origen externo se escribe como texto; si empieza por `=`, `+`, `-` o `@` se fuerza `cell.data_type = 's'` para evitar inyección de fórmulas.
+| Orden | Encabezado visible | Contenido |
+| --- | --- | --- |
+| 1 | `Línea origen` | Línea del CSV (la cabecera es la 1). |
+| 2 | `Valor original` | Campo tal como lo entrega el parser, sin normalizar; las comillas de `"42"` ya las quitó el parser. |
+| 3 | `ID cuenta` | Entero si el id es válido; vacío si es inválido. |
+| 4 | `Estado` | `PENDIENTE`, `OK`, `NO_ENCONTRADO`, `DATO_INVALIDO` o `ERROR_TECNICO`. |
+| 5 | `Causa` | Causa del estado, cuando aplica; vacía en `OK` y `PENDIENTE`. |
+| 6 | `Apariciones` | Veces que aparece el id en el CSV. |
+| 7 | `Intentos` | Peticiones HTTP realizadas para ese id; `0` si no se consultó. |
+| 8 | `Detalle del error` | Detalle técnico, cuando aplica. |
+| 9 | `Consultado en` | Última actualización (`actualizado_en`), mostrada como `AAAA-MM-DD HH:MM:SS` en hora local, sin `T` ni zona; en SQLite se guarda en ISO-8601 con zona. |
+| 10 | `ID usuario` | `userId` de la API. |
+| 11 | `Título` | `title` de la API. |
+| 12 | `Cuerpo` | `body` de la API, sin ajuste de línea. |
+
+Formato de `Resultados`: encabezado de altura 28 con banda oscura (`404040`), texto blanco en negrita, centrado y con ajuste de línea; autofiltro; anchos fijos 12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40 y 70; filas de datos de altura 20, alineación vertical centrada y sin ajuste de línea en `Título` ni `Cuerpo`. Las columnas `Línea origen`, `ID cuenta`, `Apariciones`, `Intentos` e `ID usuario` se centran y el resto queda a la izquierda. La celda `Estado` lleva el color de estado: verde claro para `OK`, amarillo para `NO_ENCONTRADO`, naranja para `DATO_INVALIDO`, rojo claro para `ERROR_TECNICO` y gris para `PENDIENTE`; las filas con estado distinto de `OK` llevan además un relleno suave de la misma familia, y las `OK` no llevan relleno de fila. Panel congelado en `D2`; impresión horizontal ajustada a una página de ancho con la fila 1 repetida; al abrir el archivo queda activa `Resultados`.
+
+Todo texto de origen externo se escribe como texto; si empieza por `=`, `+`, `-` o `@` se fuerza `cell.data_type = 's'` para evitar inyección de fórmulas.
 
 Hoja `Resumen`, derivada de la base de datos:
 
-- Archivo: nombre, hash, primera carga y fecha de generación.
-- Entrada: líneas con datos, líneas en blanco ignoradas, repeticiones ignoradas e ids únicos.
-- Resultado por estado.
-- Errores técnicos por causa.
-- Lista de ids repetidos y sus apariciones.
+- Título «Resumen del archivo».
+- Bloque Archivo: `Nombre`, `Hash`, `Primera carga` y `Generado en`.
+- Bloque Entrada: `Líneas con datos`, `Líneas en blanco ignoradas`, `Repeticiones ignoradas` e `Identificadores únicos`.
+- Bloque Resultado por estado: tabla `Estado`/`Total` con los cinco estados y una fila `Total`.
+- Bloque Errores técnicos por causa: tabla `Causa`/`Total`, o «Sin errores técnicos» si no hay ninguno.
+- Bloque Repetidos: tabla `Id`/`Apariciones`, o «Sin repetidos» si no hay ninguno.
 
 ### Base de datos
 
@@ -132,21 +141,43 @@ Hoja `Resumen`, derivada de la base de datos:
 
 ### Log
 
-`logs/proceso.log` es rotativo (`max_bytes` × `copias`) y también se escribe en consola. Registra el inicio, el resultado de cada id, los reintentos y el resumen final. Los cuerpos de las respuestas no se escriben nunca en el log.
+`logs/proceso.log` es rotativo: cada archivo puede llegar a `max_bytes` y se conservan hasta `copias` archivos rotados, además del actual. También se escribe en consola. Registra el inicio, el resultado de cada id, cada intento fallido y el resumen final. Los cuerpos de las respuestas son datos médicos y no se escriben nunca en el log.
 
-Ejemplo de resumen:
+Salida real de una ejecución con el estado ya resuelto:
 
 ```text
-archivo=cuentas.csv hash=5d797c34...
-entrada: lineas_con_datos=20 lineas_en_blanco=1 repeticiones_ignoradas=3 ids_unicos=17
-repetidos: 7 x3, 12 x2
-resultado: PENDIENTE=0 OK=13 NO_ENCONTRADO=3 DATO_INVALIDO=1 ERROR_TECNICO=0
-errores_tecnicos: ninguno
-ejecucion: consultados=16 reutilizados=0 reintentos=0 duracion_s=0.05
-excel=salida/consolidado_2026-10-23_5d797c34.xlsx
+==============================================================
+ RESUMEN DE LA EJECUCIÓN
+==============================================================
+ Archivo : cuentas.csv  (hash 5d797c34)
+ Excel   : salida/consolidado_2026-10-24_5d797c34.xlsx
+
+ ENTRADA
+   Líneas con datos .............  20
+   Líneas en blanco ignoradas ...   1
+   Repeticiones ignoradas .......   3   (7 x3, 12 x2)
+   Identificadores únicos .......  17
+
+ RESULTADO POR ESTADO
+   OK ...........................  13
+   NO_ENCONTRADO ................   3
+   DATO_INVALIDO ................   1
+   ERROR_TECNICO ................   0
+   PENDIENTE ....................   0
+   Total ........................  17
+
+ ERRORES TÉCNICOS POR CAUSA
+   (ninguno)
+
+ ESTA EJECUCIÓN
+   Consultados ..................   0
+   Reutilizados .................  16
+   Reintentos ...................   0
+   Duración .....................  0.09 s
+==============================================================
 ```
 
-`reutilizados` cuenta los ids que ya estaban resueltos por la API (`OK` o `NO_ENCONTRADO`) antes de esta ejecución. Los `DATO_INVALIDO` no se reconsultan ni se cuentan como reutilizados, y los `ERROR_TECNICO` se vuelven a consultar.
+`consultados` cuenta los ids únicos que esta ejecución intentó resolver, incluidos los que terminaron en `ERROR_TECNICO`. `reutilizados` cuenta solo las consultas evitadas: ids que ya estaban `OK` o `NO_ENCONTRADO` en ejecuciones anteriores. Los `DATO_INVALIDO` no se consultan ni se cuentan como reutilizados, y los `ERROR_TECNICO` se vuelven a consultar. `reintentos` suma los intentos adicionales al primero y `duración` mide el pipeline: normalización, consultas, pausas y generación del Excel.
 
 ### Códigos de salida
 
@@ -154,7 +185,7 @@ excel=salida/consolidado_2026-10-23_5d797c34.xlsx
 | --- | --- |
 | `0` | Terminó y no queda nada pendiente. `NO_ENCONTRADO` y `DATO_INVALIDO` son resultados de negocio. |
 | `1` | Terminó, pero quedan `ERROR_TECNICO` o `PENDIENTE`; conviene relanzar. El Excel se genera igualmente. |
-| `2` | Fallo fatal: configuración inválida, CSV ausente o ilegible, columna ausente, error de base de datos o del Excel. |
+| `2` | Fallo fatal: configuración inválida, CSV ausente o ilegible, columna ausente, error de base de datos o del Excel, o cualquier excepción no controlada. |
 
 ## Decisiones de diseño
 
@@ -164,33 +195,65 @@ Se consulta y se escribe **una sola fila por id único**, con la columna `aparic
 
 ### Qué se reintenta y qué no
 
-Se reintenta lo que puede cambiar al volver a preguntar: timeouts, errores de conexión, HTTP 5xx, HTTP 429 y respuestas corruptas o sin el id esperado. No se reintenta dentro de la ejecución lo determinista: un 404, un dato inválido o un 4xx por una petición mal formada. Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución. La espera es exponencial con jitter parcial, con techo, y respeta `Retry-After` cuando es válido.
+**Dentro de la ejecución** (hasta `max_intentos` intentos por id, con espera exponencial con jitter parcial, con techo, y respetando `Retry-After`): se reintenta lo que puede cambiar al volver a preguntar, es decir, timeouts, errores de conexión, 5xx, 429 y respuestas corruptas o sin el id esperado. No se reintenta lo determinista: un 404, un dato inválido, cualquier otro 4xx (por ejemplo, una petición mal formada), un error inesperado ni un código HTTP fuera de la tabla (1xx, 3xx, 2xx distintos de 200), que se clasifica como `ERROR_INESPERADO` con el código en `detalle_error`.
+
+**Entre ejecuciones**: todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución, incluidos los que no se reintentaron dentro de la ejecución. Solo `OK`, `NO_ENCONTRADO` y `DATO_INVALIDO` son finales.
+
+Dos matices que conviene tener presentes:
+
+- Un timeout de conexión se clasifica como `TIMEOUT`: la comprobación de `requests.exceptions.Timeout` va antes que la de `ConnectionError`, así que `ConnectTimeout` no cae en `CONEXION`.
+- `Retry-After` se respeta en cualquier respuesta reintentable, no solo en 429. Si es inválido o negativo, se ignora y se usa la espera exponencial normal; si es válido, se limita a `retry_after_maximo_s`.
+
+| Situación | ¿Reintenta dentro de la ejecución? | Estado | Causa |
+| --- | --- | --- | --- |
+| 200 con JSON válido y el `id` esperado | No aplica | `OK` | — |
+| 404 | No | `NO_ENCONTRADO` | `HTTP_404` |
+| `Timeout` (incluido `ConnectTimeout`) | Sí | `ERROR_TECNICO` | `TIMEOUT` |
+| `ConnectionError` | Sí | `ERROR_TECNICO` | `CONEXION` |
+| Cualquier 5xx | Sí | `ERROR_TECNICO` | `HTTP_5XX` |
+| 429 | Sí | `ERROR_TECNICO` | `HTTP_429` |
+| 200 sin JSON válido, JSON que no es objeto o `id` distinto | Sí | `ERROR_TECNICO` | `RESPUESTA_INVALIDA` |
+| Cualquier otro 4xx | No | `ERROR_TECNICO` | `HTTP_4XX` |
+| Otra excepción de `requests` | No | `ERROR_TECNICO` | `ERROR_INESPERADO` |
+| HTTP 1xx, 3xx o 2xx distinto de 200 | No | `ERROR_TECNICO` | `ERROR_INESPERADO` |
+| Excepción no relacionada con `requests` durante la resolución | No | `ERROR_TECNICO` | `ERROR_INESPERADO` |
+| Valor no válido en el CSV | No se consulta | `DATO_INVALIDO` | `FORMATO_INVALIDO` |
 
 ### Idempotencia y reanudación
 
 La identidad del archivo es su SHA-256. La primera carga inserta los ids con `INSERT OR IGNORE`; las siguientes ejecuciones solo procesan `PENDIENTE` y `ERROR_TECNICO`, y el Excel se regenera siempre desde la base. Relanzar es seguro: no se duplican filas ni se reconsulta lo ya resuelto. Cada id se confirma al terminar, así que un Ctrl+C o un corte dejan el estado consistente y la ejecución siguiente retoma donde quedó.
 
-### 404 definitivo
+**Supuesto:** se asume que el archivo de cada día tiene contenido distinto. Si llegara uno idéntico a otro ya procesado, tendría el mismo hash: no se reconsultaría nada y el Excel conservaría el nombre de la primera carga. Una mejora futura sería incluir la fecha de recepción en la identidad del archivo.
 
-Un 404 se trata como resultado definitivo (`NO_ENCONTRADO`) y no se reconsulta. La API de ejemplo es estática y el requisito de reanudación pide no volver a preguntar lo resuelto. En un sistema con replicación o altas posteriores un 404 podría ser transitorio; si eso cambiara, habría que revisar esta decisión y la política de reutilización.
+### 404 definitivo (supuesto)
+
+**Supuesto:** un 404 se trata como resultado definitivo (`NO_ENCONTRADO`) y no se reconsulta. La API de ejemplo es estática y el requisito de reanudación pide no volver a preguntar lo resuelto. En un sistema con replicación o altas posteriores un 404 podría ser transitorio; si eso cambiara, habría que revisar esta decisión y la política de reutilización.
 
 ### Sin cortacircuitos
 
-No hay cortacircuitos ni límite global de fallos: cada id agota su propio ciclo de reintentos y el proceso continúa con el siguiente. Es la lectura literal de «ningún identificador que falle detiene el proceso». La contrapartida es que una API completamente caída tarda lo que tarden todos los ids en agotar sus reintentos.
+No hay cortacircuitos ni límite global de fallos: cada id agota su propio ciclo de reintentos y el proceso continúa con el siguiente.
+
+- Cada id se procesa de forma independiente. Por eso, con la API completamente caída, la ejecución dura lo que tarden todos los ids en agotar sus reintentos. Con la configuración por defecto, el orden de magnitud esperado es de unos 5 segundos por id si la conexión se rechaza al instante, y de unos 45 segundos si la API no responde (timeouts); no se ha medido contra una API caída en esta entrega. Crece linealmente con el número de ids.
+- Se acepta porque es la lectura literal de «ningún identificador que falle detiene el proceso» y no se pierde ningún dato: todo lo que se consulta queda como `ERROR_TECNICO`, la ejecución termina con código `1` y al relanzar retoma.
+- Se puede reducir sin tocar código con `max_intentos`, `timeout_lectura_s` y `espera_maxima_s`, además del resto de parámetros de `[reintentos]`.
+- Mejora futura: un cortacircuitos que deje de reintentar tras N fallos seguidos pero siga procesando el resto.
 
 ### Log sin datos clínicos
 
-El log registra id, estado, causa e intentos, pero nunca los cuerpos de las respuestas. El Excel y la base sí contienen esos datos y deben tratarse como información sensible: permisos restringidos y una política de retención definida.
+El log registra id, estado, causa e intentos, pero nunca los cuerpos de las respuestas: son datos médicos. El Excel y la base sí contienen esos datos y deben tratarse como información sensible: permisos restringidos y una política de retención definida.
 
 ### Otras decisiones
 
 - Los datos inválidos se auditan: aparecen en el Excel como `DATO_INVALIDO` y no se envían a la API.
 - Configuración fuera del código, en TOML, validada antes de tocar el CSV.
 - El Excel se regenera completo desde SQLite y se reemplaza de forma atómica.
+- Protección contra inyección de fórmulas: todo texto externo que empieza por `=`, `+`, `-` o `@` se escribe con `cell.data_type = 's'`.
 
 ## Runbook de las 3:00
 
 Primeros cinco minutos:
+
+Códigos de salida: `0` no queda nada pendiente; `1` quedan `ERROR_TECNICO` o `PENDIENTE`; `2` fallo fatal. El detalle está en [Códigos de salida](#códigos-de-salida).
 
 1. Mirar el código de salida del proceso.
 2. Leer las últimas líneas de `logs/proceso.log`; el resumen final resume entrada, estados, causas, consultas y ruta del Excel.
@@ -207,8 +270,8 @@ Primeros cinco minutos:
 | Salida 1 con `HTTP_429` | Límite de peticiones | Relanzar más tarde o subir la espera |
 | Salida 1 con `HTTP_4XX` | URL o petición mal configurada | Corregir la configuración antes de relanzar |
 | Salida 1 con `RESPUESTA_INVALIDA` | Proxy o cambio en la API | Revisar una respuesta a mano y escalar |
-| `ERROR_INESPERADO` en el log | Bug | Guardar el traceback y escalar; el resto del Excel es válido |
-| Excel no se genera | Archivo abierto, permisos o disco | Liberar el recurso y relanzar (se regenera desde la base) |
+| Salida 1 con `ERROR_INESPERADO` (o en el log) | Bug o respuesta HTTP fuera de la tabla | Guardar el traceback y escalar; el resto del Excel es válido |
+| Salida 2: el Excel no se genera | Archivo abierto, permisos o disco | Liberar el recurso y relanzar (se regenera desde la base) |
 | Ejecución mucho más larga de lo normal | API lenta | Dejar terminar, o cortar y relanzar |
 
 Reglas:
@@ -252,26 +315,7 @@ WHERE archivo_hash = '<hash>' AND apariciones > 1
 ORDER BY apariciones DESC, id;
 ```
 
-Escalamiento: completar con el contacto de guardia o el dueño del proceso (nombre, teléfono y correo). Mientras no exista, escalar al responsable técnico del repositorio.
-
-## Pendiente y por qué
-
-Fuera de alcance en esta entrega:
-
-- Otros formatos de CSV. Solo se contempla una columna de identificadores localizada por el encabezado configurado; si la columna no aparece, el proceso falla con salida `2`. No se adivinan codificaciones ni delimitadores.
-- Concurrencia, cortacircuitos, bloqueo de instancia única y puertos/adaptadores formales. El volumen diario no lo exige y añadirlos complicaría la explicación sin mejorar el resultado.
-- 404 transitorios. Se asume la API estática; ver la decisión sobre el 404 definitivo.
-- Purga automática de datos viejos.
-
-Retención: los logs rotan, pero el Excel y la base de datos se acumulan. No hay limpieza automática; hay que definir una política de retención y archivado según las necesidades de auditoría y privacidad. Mientras no exista, revisar el espacio en disco y no borrar la base sin confirmar que se puede reconsultar todo.
-
-Límites conocidos:
-
-- Solo se aceptan ids con dígitos ASCII; `-5`, `3.5` o `abc` se auditan como `DATO_INVALIDO` y no se consultan. Los ceros a la izquierda se normalizan (`007` → `7`).
-- La ausencia de un id en la API se interpreta como 404 definitivo.
-- El proceso es secuencial y no bloquea una segunda instancia; dos ejecuciones simultáneas pueden competir por la base y el Excel.
-- Si el CSV cambia, se trata como un archivo nuevo y se consulta de nuevo todo.
-- El log no contiene cuerpos, pero el Excel y SQLite sí; su acceso debe restringirse.
+Escalamiento: [CONTACTO]. Completar con el nombre, teléfono y correo del contacto de guardia o del dueño del proceso.
 
 ## Tests
 
@@ -290,3 +334,26 @@ En Windows:
 ```
 
 Los tests cubren lectura y normalización del CSV, clasificación y reintentos, repositorio, pipeline (idempotencia, reanudación, Excel y hoja Resumen), configuración, CLI, logging y modelos.
+
+## Pendiente y por qué
+
+Fuera de alcance en esta entrega:
+
+- Otros formatos de CSV. Solo se contempla una columna de identificadores localizada por el encabezado configurado; si la columna no aparece, el proceso falla con salida `2`. No se adivinan codificaciones ni delimitadores.
+- Concurrencia. El proceso es secuencial y no bloquea una segunda instancia; dos ejecuciones simultáneas pueden competir por la base y el Excel.
+- Cortacircuitos. Hoy cada id agota su propio ciclo; una mejora futura sería dejar de reintentar tras N fallos seguidos sin detener el resto de ids.
+- Bloqueo de instancia única. Evitaría que dos procesos compitan por la misma base y el mismo Excel.
+- Interfaces formales (ports y adapters). Las dependencias se inyectan como parámetros; no se usan `Protocol` ni clases abstractas.
+- 404 transitorios. Se asume la API estática; ver la decisión sobre el 404 definitivo.
+- Purga automática de datos viejos.
+- Identidad por contenido. La identidad actual es el SHA-256 del contenido: un archivo idéntico a otro ya procesado conservaría el hash, no reconsultaría nada y reutilizaría el nombre de la primera carga. Una mejora futura sería incluir la fecha de recepción en la identidad del archivo.
+
+Retención: los logs rotan, pero el Excel y la base de datos se acumulan. No hay limpieza automática; hay que definir una política de retención y archivado según las necesidades de auditoría y privacidad. Mientras no exista, revisar el espacio en disco y no borrar la base sin confirmar que se puede reconsultar todo.
+
+Límites conocidos:
+
+- Solo se aceptan ids con dígitos ASCII; `-5`, `3.5` o `abc` se auditan como `DATO_INVALIDO` y no se consultan. Los ceros a la izquierda se normalizan (`007` → `7`).
+- La ausencia de un id en la API se interpreta como 404 definitivo.
+- El proceso es secuencial y no bloquea una segunda instancia; dos ejecuciones simultáneas pueden competir por la base y el Excel.
+- Si el CSV cambia, se trata como un archivo nuevo y se consulta de nuevo todo.
+- El log no contiene cuerpos, pero el Excel y SQLite sí; su acceso debe restringirse.
