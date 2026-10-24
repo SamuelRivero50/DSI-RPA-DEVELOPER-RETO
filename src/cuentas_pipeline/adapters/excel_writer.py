@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from cuentas_pipeline.core.config import SalidaConfig
@@ -27,6 +27,8 @@ _COLUMNAS = [
 
 _PREFIJOS_FORMULA = ("=", "+", "-", "@")
 
+_FUENTE = "Calibri"
+
 _RELLENOS = {
     Estado.OK.value: "C6EFCE",
     Estado.NO_ENCONTRADO.value: "FFEB9C",
@@ -35,7 +37,26 @@ _RELLENOS = {
     Estado.PENDIENTE.value: "D9D9D9",
 }
 
+_COLOR_BANDA = "404040"
+_COLOR_TEXTO_SECUNDARIO = "808080"
+_LADO_FINO = Side(style="thin", color="BFBFBF")
+_BORDE_FINO = Border(left=_LADO_FINO, right=_LADO_FINO, top=_LADO_FINO, bottom=_LADO_FINO)
+_BORDE_TOTAL = Border(
+    left=_LADO_FINO,
+    right=_LADO_FINO,
+    top=Side(style="thin", color=_COLOR_BANDA),
+    bottom=_LADO_FINO,
+)
+
 _ANCHOS = [14, 18, 12, 18, 18, 12, 10, 30, 50, 10, 40, 26]
+
+_ORDEN_ESTADOS = (
+    Estado.OK,
+    Estado.NO_ENCONTRADO,
+    Estado.DATO_INVALIDO,
+    Estado.ERROR_TECNICO,
+    Estado.PENDIENTE,
+)
 
 
 def _fecha_archivo(filas: list[dict[str, object]]) -> str:
@@ -64,15 +85,44 @@ def _valores(fila: dict[str, object]) -> list[object]:
     ]
 
 
+def _fuente(
+    *,
+    tamano: int = 11,
+    negrita: bool = False,
+    cursiva: bool = False,
+    color: str | None = None,
+) -> Font:
+    return Font(name=_FUENTE, size=tamano, bold=negrita, italic=cursiva, color=color)
+
+
+def _relleno(color: str) -> PatternFill:
+    return PatternFill(fill_type="solid", start_color=color, end_color=color)
+
+
 def _proteger_texto(celda) -> None:
     if isinstance(celda.value, str) and celda.value.startswith(_PREFIJOS_FORMULA):
         celda.data_type = "s"
 
 
-def _escribir_celda(hoja, fila: int, columna: int, valor, negrita: bool = False):
+def _escribir_celda(
+    hoja,
+    fila: int,
+    columna: int,
+    valor,
+    *,
+    tamano: int = 11,
+    negrita: bool = False,
+    cursiva: bool = False,
+    color: str | None = None,
+    relleno: str | None = None,
+    borde=None,
+):
     celda = hoja.cell(row=fila, column=columna, value=valor)
-    if negrita:
-        celda.font = Font(bold=True)
+    celda.font = _fuente(tamano=tamano, negrita=negrita, cursiva=cursiva, color=color)
+    if relleno is not None:
+        celda.fill = _relleno(relleno)
+    if borde is not None:
+        celda.border = borde
     _proteger_texto(celda)
     return celda
 
@@ -80,6 +130,15 @@ def _escribir_celda(hoja, fila: int, columna: int, valor, negrita: bool = False)
 def _primera_carga(filas: list[dict[str, object]]) -> str:
     fechas = [str(fila["creado_en"]) for fila in filas if fila.get("creado_en")]
     return min(fechas) if fechas else ""
+
+
+def _formatear_fecha(valor: str) -> str:
+    if not valor:
+        return ""
+    try:
+        return datetime.fromisoformat(valor).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return valor
 
 
 def _conteos_por_estado(filas: list[dict[str, object]]) -> dict[str, int]:
@@ -99,6 +158,38 @@ def _conteos_por_causa(filas: list[dict[str, object]]) -> dict[str, int]:
     return dict(sorted(conteos.items()))
 
 
+def _banda(hoja, fila: int, titulo: str) -> None:
+    for columna in (1, 2):
+        _escribir_celda(
+            hoja,
+            fila,
+            columna,
+            titulo if columna == 1 else None,
+            negrita=True,
+            color="FFFFFF",
+            relleno=_COLOR_BANDA,
+        )
+    hoja.row_dimensions[fila].height = 20
+
+
+def _cabecera_tabla(hoja, fila: int, *titulos: str) -> None:
+    for columna, titulo in enumerate(titulos, start=1):
+        _escribir_celda(
+            hoja,
+            fila,
+            columna,
+            titulo,
+            negrita=True,
+            relleno=_RELLENOS[Estado.PENDIENTE.value],
+            borde=_BORDE_FINO,
+        )
+
+
+def _campo(hoja, fila: int, etiqueta: str, valor, **estilo) -> None:
+    _escribir_celda(hoja, fila, 1, etiqueta)
+    _escribir_celda(hoja, fila, 2, valor, **estilo)
+
+
 def _escribir_resumen(
     libro,
     archivo_nombre: str,
@@ -108,75 +199,113 @@ def _escribir_resumen(
     generado_en: str,
 ) -> None:
     hoja = libro.create_sheet("Resumen")
+    hoja.sheet_view.showGridLines = False
     hoja.column_dimensions["A"].width = 34
-    hoja.column_dimensions["B"].width = 70
-    fila = 1
+    hoja.column_dimensions["B"].width = 16
 
-    _escribir_celda(hoja, fila, 1, "Archivo", True)
+    _escribir_celda(hoja, 1, 1, "Resumen del archivo", tamano=14, negrita=True)
+    hoja.row_dimensions[1].height = 22
+    fila = 3
+
+    _banda(hoja, fila, "Archivo")
+    fila += 1
+    _campo(hoja, fila, "Nombre", archivo_nombre)
+    fila += 1
+    _campo(
+        hoja,
+        fila,
+        "Hash",
+        archivo_hash,
+        tamano=9,
+        color=_COLOR_TEXTO_SECUNDARIO,
+    )
+    fila += 1
+    _campo(hoja, fila, "Primera carga", _formatear_fecha(_primera_carga(filas)))
+    fila += 1
+    _campo(hoja, fila, "Generado en", _formatear_fecha(generado_en))
+    fila += 2
+
+    _banda(hoja, fila, "Entrada")
     fila += 1
     for etiqueta, valor in [
-        ("nombre", archivo_nombre),
-        ("hash", archivo_hash),
-        ("primera carga", _primera_carga(filas)),
-        ("generado en", generado_en),
+        ("Líneas con datos", normalizacion.lineas_con_datos),
+        ("Líneas en blanco ignoradas", normalizacion.lineas_en_blanco),
+        ("Repeticiones ignoradas", normalizacion.repeticiones_ignoradas),
+        ("Identificadores únicos", len(normalizacion.filas)),
     ]:
-        _escribir_celda(hoja, fila, 1, etiqueta)
-        _escribir_celda(hoja, fila, 2, valor)
+        _campo(hoja, fila, etiqueta, valor)
         fila += 1
+    fila += 1
 
+    _banda(hoja, fila, "Resultado por estado")
     fila += 1
-    _escribir_celda(hoja, fila, 1, "Entrada", True)
+    _cabecera_tabla(hoja, fila, "Estado", "Total")
     fila += 1
-    for etiqueta, valor in [
-        ("lineas con datos", normalizacion.lineas_con_datos),
-        ("lineas en blanco ignoradas", normalizacion.lineas_en_blanco),
-        ("repeticiones ignoradas", normalizacion.repeticiones_ignoradas),
-        ("ids unicos", len(normalizacion.filas)),
-    ]:
-        _escribir_celda(hoja, fila, 1, etiqueta)
-        _escribir_celda(hoja, fila, 2, valor)
+    conteos = _conteos_por_estado(filas)
+    for estado in _ORDEN_ESTADOS:
+        total = conteos[estado.value]
+        for columna, valor in [(1, estado.value), (2, total)]:
+            _escribir_celda(
+                hoja,
+                fila,
+                columna,
+                valor,
+                relleno=_RELLENOS[estado.value],
+                borde=_BORDE_FINO,
+            )
         fila += 1
+    for columna, valor in [(1, "Total"), (2, sum(conteos.values()))]:
+        _escribir_celda(
+            hoja,
+            fila,
+            columna,
+            valor,
+            negrita=True,
+            borde=_BORDE_TOTAL,
+        )
+    fila += 2
 
-    fila += 1
-    _escribir_celda(hoja, fila, 1, "Resultado por estado", True)
-    fila += 1
-    _escribir_celda(hoja, fila, 1, "estado", True)
-    _escribir_celda(hoja, fila, 2, "total", True)
-    fila += 1
-    for estado, total in _conteos_por_estado(filas).items():
-        _escribir_celda(hoja, fila, 1, estado)
-        _escribir_celda(hoja, fila, 2, total)
-        fila += 1
-
-    fila += 1
-    _escribir_celda(hoja, fila, 1, "Errores tecnicos por causa", True)
-    fila += 1
-    _escribir_celda(hoja, fila, 1, "causa", True)
-    _escribir_celda(hoja, fila, 2, "total", True)
+    _banda(hoja, fila, "Errores técnicos por causa")
     fila += 1
     errores = _conteos_por_causa(filas)
     if errores:
+        _cabecera_tabla(hoja, fila, "Causa", "Total")
+        fila += 1
         for causa, total in errores.items():
-            _escribir_celda(hoja, fila, 1, causa)
-            _escribir_celda(hoja, fila, 2, total)
+            for columna, valor in [(1, causa), (2, total)]:
+                _escribir_celda(hoja, fila, columna, valor, borde=_BORDE_FINO)
             fila += 1
     else:
-        _escribir_celda(hoja, fila, 1, "ninguno")
+        _escribir_celda(
+            hoja,
+            fila,
+            1,
+            "Sin errores técnicos",
+            cursiva=True,
+            color=_COLOR_TEXTO_SECUNDARIO,
+        )
         fila += 1
+    fila += 1
 
+    _banda(hoja, fila, "Repetidos")
     fila += 1
-    _escribir_celda(hoja, fila, 1, "Repetidos", True)
-    fila += 1
-    _escribir_celda(hoja, fila, 1, "id", True)
-    _escribir_celda(hoja, fila, 2, "apariciones", True)
+    _cabecera_tabla(hoja, fila, "Id", "Apariciones")
     fila += 1
     if normalizacion.repetidos:
         for id_cuenta, apariciones in normalizacion.repetidos:
-            _escribir_celda(hoja, fila, 1, id_cuenta)
-            _escribir_celda(hoja, fila, 2, apariciones)
+            valor_id = int(id_cuenta) if id_cuenta.isdigit() else id_cuenta
+            for columna, valor in [(1, valor_id), (2, apariciones)]:
+                _escribir_celda(hoja, fila, columna, valor, borde=_BORDE_FINO)
             fila += 1
     else:
-        _escribir_celda(hoja, fila, 1, "ninguno")
+        _escribir_celda(
+            hoja,
+            fila,
+            1,
+            "Sin repetidos",
+            cursiva=True,
+            color=_COLOR_TEXTO_SECUNDARIO,
+        )
 
 
 class ExcelWriter:
@@ -208,15 +337,11 @@ class ExcelWriter:
             hoja.title = "Resultados"
             hoja.append(_COLUMNAS)
             for celda in hoja[1]:
-                celda.font = Font(bold=True)
+                celda.font = _fuente(negrita=True)
 
             for fila in filas:
                 hoja.append(_valores(fila))
-                relleno = PatternFill(
-                    fill_type="solid",
-                    start_color=_RELLENOS[str(fila["estado"])],
-                    end_color=_RELLENOS[str(fila["estado"])],
-                )
+                relleno = _relleno(_RELLENOS[str(fila["estado"])])
                 for celda in hoja[hoja.max_row]:
                     _proteger_texto(celda)
                     celda.fill = relleno

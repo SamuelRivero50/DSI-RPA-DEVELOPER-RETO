@@ -310,19 +310,21 @@ def test_el_excel_tiene_una_fila_por_id_unico(tmp_path):
     assert por_id[None][3].value == "DATO_INVALIDO"
 
     resumen_hoja = libro["Resumen"]
-    assert _valor_resumen(resumen_hoja, "nombre") == "cuentas.csv"
-    assert _valor_resumen(resumen_hoja, "hash") == lectura.archivo_hash
-    assert _valor_resumen(resumen_hoja, "primera carga")
-    assert _valor_resumen(resumen_hoja, "generado en")
-    assert _valor_resumen(resumen_hoja, "lineas con datos") == 20
-    assert _valor_resumen(resumen_hoja, "lineas en blanco ignoradas") == 1
-    assert _valor_resumen(resumen_hoja, "repeticiones ignoradas") == 3
-    assert _valor_resumen(resumen_hoja, "ids unicos") == 17
+    assert _valor_resumen(resumen_hoja, "Nombre") == "cuentas.csv"
+    assert _valor_resumen(resumen_hoja, "Hash") == lectura.archivo_hash
+    primera_carga = _valor_resumen(resumen_hoja, "Primera carga")
+    generado_en = _valor_resumen(resumen_hoja, "Generado en")
+    assert len(primera_carga) == 19 and "T" not in primera_carga
+    assert len(generado_en) == 19 and "T" not in generado_en
+    assert _valor_resumen(resumen_hoja, "Líneas con datos") == 20
+    assert _valor_resumen(resumen_hoja, "Líneas en blanco ignoradas") == 1
+    assert _valor_resumen(resumen_hoja, "Repeticiones ignoradas") == 3
+    assert _valor_resumen(resumen_hoja, "Identificadores únicos") == 17
     assert _valor_resumen(resumen_hoja, "OK") == 13
     assert _valor_resumen(resumen_hoja, "NO_ENCONTRADO") == 3
     assert _valor_resumen(resumen_hoja, "DATO_INVALIDO") == 1
-    assert _valor_resumen(resumen_hoja, "7") == 3
-    assert _valor_resumen(resumen_hoja, "12") == 2
+    assert _valor_resumen(resumen_hoja, 7) == 3
+    assert _valor_resumen(resumen_hoja, 12) == 2
     repo.cerrar()
 
 
@@ -387,4 +389,80 @@ def test_el_excel_tiene_formato_y_color_por_estado(tmp_path):
     assert por_id[8][0].fill.fgColor.rgb.endswith("FFC7CE")
     assert por_id[None][0].fill.fgColor.rgb.endswith("F8CBAD")
     assert _valor_resumen(libro["Resumen"], "ERROR_INESPERADO") == 1
+    repo.cerrar()
+
+
+def test_la_hoja_resumen_tiene_formato_legible(tmp_path):
+    config = _config(tmp_path)
+    lectura = _lectura([(2, "7"), (3, "7"), (4, "12"), (5, "abc")])
+
+    def responder(id_cuenta):
+        return _respuesta_ok(id_cuenta)
+
+    repo = Repositorio(config.salida)
+    resumen = ejecutar(
+        lectura,
+        config,
+        repo,
+        ClienteFalso(responder),
+        escritor=ExcelWriter(config.salida),
+        sleep=lambda _segundos: None,
+    )
+
+    hoja = load_workbook(resumen.ruta_excel)["Resumen"]
+
+    def fila_con(etiqueta):
+        for fila in hoja.iter_rows():
+            if fila[0].value == etiqueta:
+                return fila
+        raise AssertionError(f"no está {etiqueta!r} en la hoja Resumen")
+
+    assert hoja.sheet_view.showGridLines is False
+    assert len(hoja.merged_cells.ranges) == 0
+    assert hoja["A1"].value == "Resumen del archivo"
+    assert hoja["A1"].font.size == 14
+    assert hoja["A1"].font.bold
+
+    for seccion in [
+        "Archivo",
+        "Entrada",
+        "Resultado por estado",
+        "Errores técnicos por causa",
+        "Repetidos",
+    ]:
+        fila = fila_con(seccion)
+        assert fila[0].fill.fgColor.rgb.endswith("404040")
+        assert fila[0].font.color.rgb.endswith("FFFFFF")
+        assert fila[0].font.bold
+
+    header = fila_con("Estado")
+    assert header[0].fill.fgColor.rgb.endswith("D9D9D9")
+    assert header[0].font.bold
+    assert header[0].border.bottom.style == "thin"
+    assert fila_con("OK")[0].fill.fgColor.rgb.endswith("C6EFCE")
+
+    total = fila_con("Total")
+    assert total[1].value == 3
+    assert total[1].font.bold
+    assert total[1].border.top.style == "thin"
+
+    hash_fila = fila_con("Hash")
+    assert hash_fila[1].value == lectura.archivo_hash
+    assert hash_fila[1].font.size < 11
+    assert hash_fila[1].font.color.rgb.endswith("808080")
+
+    sin_errores = fila_con("Sin errores técnicos")
+    assert sin_errores[0].font.italic
+    assert sin_errores[0].font.color.rgb.endswith("808080")
+
+    repetidos_header = fila_con("Id")
+    assert repetidos_header[1].value == "Apariciones"
+    repetido_7 = fila_con(7)
+    assert isinstance(repetido_7[0].value, int)
+    assert repetido_7[1].value == 2
+
+    for fila in hoja.iter_rows():
+        for celda in fila:
+            if celda.value is not None:
+                assert celda.font.name == "Calibri"
     repo.cerrar()
