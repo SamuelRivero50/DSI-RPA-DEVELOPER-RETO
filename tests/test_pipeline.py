@@ -112,7 +112,7 @@ def test_la_segunda_ejecucion_no_hace_llamadas(tmp_path):
 
     assert len(cliente.llamadas) == llamadas_primera
     assert resumen.consultados == 0
-    assert resumen.reutilizados == 17
+    assert resumen.reutilizados == 16
     assert resumen.por_estado[Estado.OK] == 13
     assert resumen.por_estado[Estado.NO_ENCONTRADO] == 3
     assert resumen.por_estado[Estado.DATO_INVALIDO] == 1

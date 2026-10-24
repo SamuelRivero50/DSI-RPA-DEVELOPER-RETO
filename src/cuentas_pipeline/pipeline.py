@@ -8,7 +8,7 @@ from cuentas_pipeline.steps.resolve import resolver
 
 logger = logging.getLogger(__name__)
 
-_ESTADOS_NO_FINALES = (Estado.PENDIENTE.value, Estado.ERROR_TECNICO.value)
+_ESTADOS_REUTILIZABLES = (Estado.OK.value, Estado.NO_ENCONTRADO.value)
 
 
 def _conteos_por_estado(repo, archivo_hash: str) -> dict[Estado, int]:
@@ -26,8 +26,8 @@ def _errores_por_causa(filas: list[dict[str, object]]) -> dict[Causa, int]:
     return errores
 
 
-def _finales_previas(filas: list[dict[str, object]]) -> int:
-    return sum(1 for fila in filas if fila["estado"] not in _ESTADOS_NO_FINALES)
+def _reutilizables_previas(filas: list[dict[str, object]]) -> int:
+    return sum(1 for fila in filas if fila["estado"] in _ESTADOS_REUTILIZABLES)
 
 
 def _registrar_resultado(id_cuenta: str, resultado: Resultado) -> None:
@@ -64,7 +64,7 @@ def ejecutar(
     if normalizacion.lineas_con_datos == 0:
         logger.warning("entrada sin datos archivo=%s", lectura.nombre)
 
-    reutilizados = _finales_previas(repo.filas(lectura.archivo_hash))
+    reutilizados = _reutilizables_previas(repo.filas(lectura.archivo_hash))
     repo.cargar_filas(lectura.archivo_hash, lectura.nombre, normalizacion.filas)
 
     pendientes = repo.pendientes(lectura.archivo_hash)
