@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 from cuentas_pipeline.core.config import SalidaConfig
-from cuentas_pipeline.core.models import Causa, Estado, FilaCuenta
+from cuentas_pipeline.core.models import Causa, Estado, FilaCuenta, Resultado
 
 _ESQUEMA = """
 CREATE TABLE IF NOT EXISTS resultados (
@@ -107,3 +107,50 @@ class Repositorio:
             )
             for registro in cursor
         ]
+
+    def guardar(self, archivo_hash: str, id_cuenta: str, resultado: Resultado) -> None:
+        with self._conexion:
+            self._conexion.execute(
+                """
+                UPDATE resultados
+                SET estado = ?, causa = ?, user_id = ?, titulo = ?, cuerpo = ?,
+                    intentos = ?, detalle_error = ?, actualizado_en = ?
+                WHERE archivo_hash = ? AND id = ?
+                """,
+                (
+                    resultado.estado.value,
+                    resultado.causa.value if resultado.causa is not None else None,
+                    resultado.user_id,
+                    resultado.titulo,
+                    resultado.cuerpo,
+                    resultado.intentos,
+                    resultado.detalle_error,
+                    _ahora(),
+                    archivo_hash,
+                    id_cuenta,
+                ),
+            )
+
+    def filas(self, archivo_hash: str) -> list[dict[str, object]]:
+        cursor = self._conexion.execute(
+            """
+            SELECT *
+            FROM resultados
+            WHERE archivo_hash = ?
+            ORDER BY linea_origen
+            """,
+            (archivo_hash,),
+        )
+        return [dict(registro) for registro in cursor]
+
+    def conteos(self, archivo_hash: str) -> dict[Estado, int]:
+        cursor = self._conexion.execute(
+            """
+            SELECT estado, COUNT(*) AS total
+            FROM resultados
+            WHERE archivo_hash = ?
+            GROUP BY estado
+            """,
+            (archivo_hash,),
+        )
+        return {Estado(registro["estado"]): int(registro["total"]) for registro in cursor}
