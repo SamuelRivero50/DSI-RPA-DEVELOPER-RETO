@@ -6,6 +6,7 @@ from dataclasses import replace
 
 from cuentas_pipeline.adapters.api_client import ApiClient
 from cuentas_pipeline.adapters.csv_reader import leer_csv
+from cuentas_pipeline.adapters.excel_writer import ExcelWriter
 from cuentas_pipeline.adapters.repository import Repositorio
 from cuentas_pipeline.core.config import ConfigInvalidaError, config_desde_dict
 from cuentas_pipeline.core.models import Estado, ResumenEjecucion
@@ -65,7 +66,10 @@ def main(argv: list[str] | None = None) -> int:
         try:
             cliente = ApiClient(config.api)
             try:
-                resumen = ejecutar(lectura, config, repo, cliente, sleep=time.sleep)
+                escritor = ExcelWriter(config.salida)
+                resumen = ejecutar(
+                    lectura, config, repo, cliente, escritor=escritor, sleep=time.sleep
+                )
             finally:
                 cliente.cerrar()
         finally:

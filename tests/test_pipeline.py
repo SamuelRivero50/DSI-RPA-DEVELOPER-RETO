@@ -1,9 +1,12 @@
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 import requests
+from openpyxl import load_workbook
 
 from cuentas_pipeline.adapters.csv_reader import LecturaCsv, leer_csv
+from cuentas_pipeline.adapters.excel_writer import ExcelWriter
 from cuentas_pipeline.adapters.repository import Repositorio
 from cuentas_pipeline.core.config import (
     ApiConfig,
@@ -239,4 +242,90 @@ def test_si_el_escritor_falla_la_excepcion_se_propaga(tmp_path):
             sleep=lambda _segundos: None,
         )
 
+    repo.cerrar()
+
+
+def test_el_excel_tiene_una_fila_por_id_unico(tmp_path):
+    config = _config(tmp_path)
+    lectura = leer_csv("cuentas.csv", EntradaConfig())
+
+    def responder(id_cuenta):
+        if id_cuenta in {"0", "101", "150"}:
+            return RespuestaFalsa(404)
+        return _respuesta_ok(id_cuenta)
+
+    repo = Repositorio(config.salida)
+    resumen = ejecutar(
+        lectura,
+        config,
+        repo,
+        ClienteFalso(responder),
+        escritor=ExcelWriter(config.salida),
+        sleep=lambda _segundos: None,
+    )
+
+    assert resumen.ruta_excel is not None
+    assert resumen.ruta_excel.exists()
+    assert resumen.ruta_excel.name.startswith("consolidado_")
+    assert resumen.ruta_excel.name.endswith(f"_{lectura.hash8}.xlsx")
+    assert list(Path(config.salida.carpeta).glob(".consolidado_*")) == []
+
+    hoja = load_workbook(resumen.ruta_excel)["Resultados"]
+    assert hoja.max_row == 18
+    assert hoja.max_column == 12
+    assert [celda.value for celda in hoja[1]] == [
+        "linea_origen",
+        "valor_original",
+        "id_cuenta",
+        "estado",
+        "causa",
+        "apariciones",
+        "user_id",
+        "titulo",
+        "cuerpo",
+        "intentos",
+        "detalle_error",
+        "consultado_en",
+    ]
+
+    por_id = {fila[2].value: fila for fila in hoja.iter_rows(min_row=2)}
+    assert len(por_id) == 17
+    assert por_id[7][1].value == "7"
+    assert por_id[7][3].value == "OK"
+    assert por_id[7][5].value == 3
+    assert por_id[7][7].value == "titulo 7"
+    assert por_id[23][1].value == " 23"
+    assert por_id[101][3].value == "NO_ENCONTRADO"
+    assert por_id[101][4].value == "HTTP_404"
+    assert por_id[None][1].value == "abc"
+    assert por_id[None][2].value is None
+    assert por_id[None][3].value == "DATO_INVALIDO"
+    repo.cerrar()
+
+
+def test_el_texto_con_prefijo_de_formula_se_escribe_como_texto(tmp_path):
+    config = _config(tmp_path)
+    lectura = _lectura([(2, "7"), (3, "=cmd")])
+
+    def responder(id_cuenta):
+        return RespuestaFalsa(200, {"id": 7, "title": "=2+2", "body": "@hola"})
+
+    repo = Repositorio(config.salida)
+    resumen = ejecutar(
+        lectura,
+        config,
+        repo,
+        ClienteFalso(responder),
+        escritor=ExcelWriter(config.salida),
+        sleep=lambda _segundos: None,
+    )
+
+    hoja = load_workbook(resumen.ruta_excel)["Resultados"]
+    por_id = {fila[2].value: fila for fila in hoja.iter_rows(min_row=2)}
+    assert por_id[7][7].value == "=2+2"
+    assert por_id[7][7].data_type == "s"
+    assert por_id[7][8].value == "@hola"
+    assert por_id[7][8].data_type == "s"
+    assert por_id[None][1].value == "=cmd"
+    assert por_id[None][1].data_type == "s"
     repo.cerrar()
