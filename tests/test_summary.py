@@ -42,7 +42,7 @@ def test_el_bloque_del_reto_tiene_todas_las_secciones_y_respeta_el_ancho():
         " ENTRADA",
         " RESULTADO POR ESTADO",
         " ERRORES TÉCNICOS POR CAUSA",
-        " ESTA CORRIDA",
+        " ESTA EJECUCIÓN",
     ]:
         assert seccion in lineas
 

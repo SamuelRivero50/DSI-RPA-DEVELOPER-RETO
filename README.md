@@ -54,7 +54,7 @@ La configuración vive en `config.toml` y se valida completa al arrancar. Las ru
 | `api` | `url_base` | URL base de los posts; se consulta `{url_base}/{id}`. | `https://jsonplaceholder.typicode.com/posts` |
 | `api` | `timeout_conexion_s` | Timeout de conexión en segundos. | `5` |
 | `api` | `timeout_lectura_s` | Timeout de lectura en segundos. | `10` |
-| `api` | `pausa_entre_consultas_s` | Espera entre ids pendientes durante la corrida. | `0` |
+| `api` | `pausa_entre_consultas_s` | Espera entre ids pendientes durante la ejecución. | `0` |
 | `reintentos` | `max_intentos` | Peticiones totales por id, incluida la inicial. | `4` |
 | `reintentos` | `espera_base_s` | Base de la espera exponencial. | `1.0` |
 | `reintentos` | `factor` | Factor de crecimiento de la espera. | `2.0` |
@@ -97,7 +97,7 @@ El proceso es secuencial. La pausa configurada se aplica entre ids pendientes, n
 
 ### Excel
 
-Se escribe siempre al final de la corrida, aunque queden pendientes, en `salida/consolidado_<YYYY-MM-DD>_<hash8>.xlsx`. La fecha es la de la primera carga del archivo (`MIN(creado_en)`) y `hash8` son los primeros ocho caracteres del SHA-256 del contenido. El archivo se escribe en un temporal de la misma carpeta y se reemplaza con `os.replace`, de modo que nunca queda un Excel a medias.
+Se escribe siempre al final de la ejecución, aunque queden pendientes, en `salida/consolidado_<YYYY-MM-DD>_<hash8>.xlsx`. La fecha es la de la primera carga del archivo (`MIN(creado_en)`) y `hash8` son los primeros ocho caracteres del SHA-256 del contenido. El archivo se escribe en un temporal de la misma carpeta y se reemplaza con `os.replace`, de modo que nunca queda un Excel a medias.
 
 Hoja `Resultados`, una fila por id único y ordenada por línea de origen:
 
@@ -142,11 +142,11 @@ entrada: lineas_con_datos=20 lineas_en_blanco=1 repeticiones_ignoradas=3 ids_uni
 repetidos: 7 x3, 12 x2
 resultado: PENDIENTE=0 OK=13 NO_ENCONTRADO=3 DATO_INVALIDO=1 ERROR_TECNICO=0
 errores_tecnicos: ninguno
-corrida: consultados=16 reutilizados=0 reintentos=0 duracion_s=0.05
+ejecucion: consultados=16 reutilizados=0 reintentos=0 duracion_s=0.05
 excel=salida/consolidado_2026-10-23_5d797c34.xlsx
 ```
 
-`reutilizados` cuenta los ids que ya estaban resueltos por la API (`OK` o `NO_ENCONTRADO`) antes de esta corrida. Los `DATO_INVALIDO` no se reconsultan ni se cuentan como reutilizados, y los `ERROR_TECNICO` se vuelven a consultar.
+`reutilizados` cuenta los ids que ya estaban resueltos por la API (`OK` o `NO_ENCONTRADO`) antes de esta ejecución. Los `DATO_INVALIDO` no se reconsultan ni se cuentan como reutilizados, y los `ERROR_TECNICO` se vuelven a consultar.
 
 ### Códigos de salida
 
@@ -164,11 +164,11 @@ Se consulta y se escribe **una sola fila por id único**, con la columna `aparic
 
 ### Qué se reintenta y qué no
 
-Se reintenta lo que puede cambiar al volver a preguntar: timeouts, errores de conexión, HTTP 5xx, HTTP 429 y respuestas corruptas o sin el id esperado. No se reintenta dentro de la corrida lo determinista: un 404, un dato inválido o un 4xx por una petición mal formada. Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución. La espera es exponencial con jitter parcial, con techo, y respeta `Retry-After` cuando es válido.
+Se reintenta lo que puede cambiar al volver a preguntar: timeouts, errores de conexión, HTTP 5xx, HTTP 429 y respuestas corruptas o sin el id esperado. No se reintenta dentro de la ejecución lo determinista: un 404, un dato inválido o un 4xx por una petición mal formada. Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución. La espera es exponencial con jitter parcial, con techo, y respeta `Retry-After` cuando es válido.
 
 ### Idempotencia y reanudación
 
-La identidad del archivo es su SHA-256. La primera carga inserta los ids con `INSERT OR IGNORE`; las siguientes corridas solo procesan `PENDIENTE` y `ERROR_TECNICO`, y el Excel se regenera siempre desde la base. Relanzar es seguro: no se duplican filas ni se reconsulta lo ya resuelto. Cada id se confirma al terminar, así que un Ctrl+C o un corte dejan el estado consistente y la corrida siguiente retoma donde quedó.
+La identidad del archivo es su SHA-256. La primera carga inserta los ids con `INSERT OR IGNORE`; las siguientes ejecuciones solo procesan `PENDIENTE` y `ERROR_TECNICO`, y el Excel se regenera siempre desde la base. Relanzar es seguro: no se duplican filas ni se reconsulta lo ya resuelto. Cada id se confirma al terminar, así que un Ctrl+C o un corte dejan el estado consistente y la ejecución siguiente retoma donde quedó.
 
 ### 404 definitivo
 
@@ -209,14 +209,14 @@ Primeros cinco minutos:
 | Salida 1 con `RESPUESTA_INVALIDA` | Proxy o cambio en la API | Revisar una respuesta a mano y escalar |
 | `ERROR_INESPERADO` en el log | Bug | Guardar el traceback y escalar; el resto del Excel es válido |
 | Excel no se genera | Archivo abierto, permisos o disco | Liberar el recurso y relanzar (se regenera desde la base) |
-| Corrida mucho más larga de lo normal | API lenta | Dejar terminar, o cortar y relanzar |
+| Ejecución mucho más larga de lo normal | API lenta | Dejar terminar, o cortar y relanzar |
 
 Reglas:
 
 - Relanzar siempre es seguro.
 - No editar el CSV a mano: cambia el hash y se reconsulta todo.
 - No borrar la base salvo último recurso: se reconsulta todo, sin corrupción.
-- Si el Excel está abierto en Windows, `os.replace` falla y la corrida sale con `2`; la base ya está confirmada y se puede regenerar al liberar el archivo.
+- Si el Excel está abierto en Windows, `os.replace` falla y la ejecución sale con `2`; la base ya está confirmada y se puede regenerar al liberar el archivo.
 
 Consultas SQLite útiles (sustituir `<hash>` por el valor del resumen):
 
@@ -239,7 +239,7 @@ FROM resultados
 WHERE archivo_hash = '<hash>' AND estado = 'ERROR_TECNICO'
 GROUP BY causa;
 
--- Pendientes y errores que se reintentarán en la próxima corrida
+-- Pendientes y errores que se reintentarán en la próxima ejecución
 SELECT id, linea_origen, causa, intentos, detalle_error
 FROM resultados
 WHERE archivo_hash = '<hash>' AND estado IN ('PENDIENTE', 'ERROR_TECNICO')

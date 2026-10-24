@@ -70,7 +70,7 @@ def formatear(resumen: ResumenEjecucion) -> str:
     lineas.extend(
         [
             "",
-            " ESTA CORRIDA",
+            " ESTA EJECUCIÓN",
             _linea("Consultados", resumen.consultados),
             _linea("Reutilizados", resumen.reutilizados),
             _linea("Reintentos", resumen.reintentos_totales),

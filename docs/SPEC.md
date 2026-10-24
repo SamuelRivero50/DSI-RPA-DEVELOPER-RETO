@@ -73,7 +73,7 @@ Una consulta y una fila por identificador único, con `apariciones`. Razones: el
 
 ## 4. Estados y causas
 
-| Estado | Tipo | ¿Final? | ¿Se consulta en otra corrida? |
+| Estado | Tipo | ¿Final? | ¿Se consulta en otra ejecución? |
 | --- | --- | --- | --- |
 | PENDIENTE | transitorio | no | sí |
 | OK | resultado | sí | no |
@@ -102,10 +102,10 @@ Error inesperado: el procesamiento de cada id va envuelto en `try/except Excepti
 | Cualquier 5xx | Sí | ERROR\_TECNICO | HTTP\_5XX |
 | 429 | Sí, respeta `Retry-After` | ERROR\_TECNICO | HTTP\_429 |
 | 200 sin JSON válido o sin el id esperado | Sí | ERROR\_TECNICO | RESPUESTA\_INVALIDA |
-| Otros 4xx | No, dentro de la corrida | ERROR\_TECNICO | HTTP\_4XX |
+| Otros 4xx | No, dentro de la ejecución | ERROR\_TECNICO | HTTP\_4XX |
 | Otra excepción de `requests` | No | ERROR\_TECNICO | ERROR\_INESPERADO |
 
-Frontera (para el README): se reintenta lo que puede cambiar al volver a preguntar (red, timeouts, 5xx, 429, respuestas corruptas). No se reintenta lo determinista dentro de la corrida (404, datos inválidos, 4xx por petición mal formada). Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución.
+Frontera (para el README): se reintenta lo que puede cambiar al volver a preguntar (red, timeouts, 5xx, 429, respuestas corruptas). No se reintenta lo determinista dentro de la ejecución (404, datos inválidos, 4xx por petición mal formada). Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución.
 
 Espera: `max_intentos` en total (por defecto 4: uno inicial y tres reintentos). Antes del intento siguiente, `tope = min(espera_maxima_s, espera_base_s * factor ** (n - 1))` y `espera = tope / 2 + random.uniform(0, tope / 2)` (jitter parcial: la espera siempre crece hasta el techo). Si llega `Retry-After` válido (segundos o fecha HTTP): `espera = min(retry_after, retry_after_maximo_s)`. `sleep` y `uniform` se inyectan como parámetros con valores por defecto, para que los tests no esperen.
 
@@ -167,7 +167,7 @@ Dónde cambiar qué (cambios en vivo): política de repetidos → `normalize.py`
 ## 8. Excel de salida (`adapters/excel_writer.py`)
 
 - Archivo: `consolidado_<YYYY-MM-DD>_<hash8>.xlsx` en `salida.carpeta`; la fecha es la de `MIN(creado_en)` del archivo de entrada.
-- Se genera siempre al final de la corrida, desde la base (aunque queden pendientes). Se escribe en un archivo temporal de la misma carpeta y se renombra con `os.replace`.
+- Se genera siempre al final de la ejecución, desde la base (aunque queden pendientes). Se escribe en un archivo temporal de la misma carpeta y se renombra con `os.replace`.
 - Hoja `Resultados`, una fila por id, ordenada por `linea_origen`. Orden de columnas: `linea_origen`, `valor_original`, `id_cuenta` (entero si es válido, vacío si no), `estado`, `causa`, `apariciones`, `intentos`, `detalle_error`, `consultado_en` (= `actualizado_en`), `user_id`, `titulo`, `cuerpo`. Encabezados visibles: «Línea origen», «Valor original», «ID cuenta», «Estado», «Causa», «Apariciones», «Intentos», «Detalle del error», «Consultado en», «ID usuario», «Título» y «Cuerpo».
 - Formato: encabezado de altura 28 con banda oscura, texto blanco en negrita, centrado y con ajuste de línea; autofiltro; anchos fijos 12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40 y 70; filas de datos de altura 20 con alineación vertical centrada y sin ajuste de línea en Título ni Cuerpo. Columnas numéricas cortas centradas y el resto a la izquierda. La celda Estado lleva el color de estado; las filas con estado distinto de OK llevan un relleno suave de la misma familia, y las OK no llevan relleno de fila. «Consultado en» se muestra como `AAAA-MM-DD HH:MM:SS` sin T ni desfase. Panel congelado en D2; impresión horizontal ajustada a una página de ancho con la fila 1 repetida; al abrir el archivo queda activa `Resultados`. `valor_original` se escribe como texto aunque parezca número, para conservar el valor recibido.
 - Seguridad: todo texto de origen externo (CSV o API) se escribe como texto. Si empieza por `=`, `+`, `-` o `@`, se fuerza `cell.data_type = 's'` para que no se interprete como fórmula.
@@ -227,7 +227,7 @@ Flujo de `pipeline.py` (secuencial):
 8. Construir el resumen y mostrarlo en consola y log.
 9. Calcular el código de salida.
 
-Resumen de la ejecución (consola y log, misma plantilla): archivo y hash; entrada (líneas con datos, en blanco, repeticiones ignoradas con sus ids y conteos, ids únicos); resultado por estado; errores técnicos por causa; solo esta corrida (consultados, reutilizados, reintentos totales, duración); ruta del Excel.
+Resumen de la ejecución (consola y log, misma plantilla): archivo y hash; entrada (líneas con datos, en blanco, repeticiones ignoradas con sus ids y conteos, ids únicos); resultado por estado; errores técnicos por causa; solo esta ejecución (consultados, reutilizados, reintentos totales, duración); ruta del Excel.
 
 | Salida | Significado |
 | --- | --- |
@@ -303,7 +303,7 @@ Runbook de las 3 a.m. Primeros cinco minutos: mirar el código de salida y las �
 | Salida 1 con RESPUESTA\_INVALIDA | Proxy o cambio en la API | Revisar una respuesta a mano y escalar |
 | ERROR\_INESPERADO en el log | Bug | Guardar el traceback y escalar; el resto del Excel es válido |
 | Excel no se genera | Archivo abierto, permisos o disco | Liberar el recurso y relanzar (se regenera desde la base) |
-| Corrida mucho más larga de lo normal | API lenta | Dejar terminar, o cortar y relanzar |
+| Ejecución mucho más larga de lo normal | API lenta | Dejar terminar, o cortar y relanzar |
 
 Reglas: relanzar siempre es seguro; no editar el CSV a mano (el hash cambia y se reconsulta todo); no borrar la base salvo último recurso (se reconsulta todo, sin corrupción); incluir consultas SQLite útiles (pendientes por archivo y conteo por estado y causa); sección de escalamiento con contacto por rellenar.
 
@@ -323,5 +323,5 @@ Pruebas manuales:
 - Correr dos veces seguidas: la segunda no hace llamadas a la API y el Excel mantiene el mismo número de filas.
 - Interrumpir con Ctrl+C a mitad y relanzar: retoma sin repetir lo resuelto.
 - Apuntar `url_base` a un host inexistente: todos quedan en `ERROR_TECNICO` (CONEXION), el proceso termina y sale con 1; al corregir y relanzar se resuelven.
-- Dejar el Excel abierto en Windows durante una corrida: sale con 2 y la base queda intacta.
+- Dejar el Excel abierto en Windows durante una ejecución: sale con 2 y la base queda intacta.
 - Reemplazar el CSV por otro contenido: se trata como archivo nuevo (otro hash y otro Excel).
