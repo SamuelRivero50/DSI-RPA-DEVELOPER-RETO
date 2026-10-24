@@ -1,6 +1,17 @@
+import logging
+import math
+import random
+import time
+from dataclasses import replace
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+
 import requests
 
+from cuentas_pipeline.core.config import ReintentosConfig
 from cuentas_pipeline.core.models import Causa, Estado, Resultado
+
+logger = logging.getLogger(__name__)
 
 
 def _error(causa: Causa, detalle: str, reintentar: bool) -> tuple[Resultado, bool]:
@@ -72,3 +83,73 @@ def clasificar_excepcion(error: Exception) -> tuple[Resultado, bool]:
         return _error(Causa.ERROR_INESPERADO, str(error), False)
 
     raise error
+
+
+def _espera(intento: int, config: ReintentosConfig, uniform) -> float:
+    tope = min(config.espera_maxima_s, config.espera_base_s * config.factor ** (intento - 1))
+    return tope / 2 + uniform(0, tope / 2)
+
+
+def _retry_after(respuesta, config: ReintentosConfig) -> float | None:
+    valor = respuesta.headers.get("Retry-After") or respuesta.headers.get("retry-after")
+    if valor is None:
+        return None
+
+    texto = valor.strip()
+    try:
+        segundos = float(texto)
+    except ValueError:
+        try:
+            fecha = parsedate_to_datetime(texto)
+        except (TypeError, ValueError):
+            return None
+        if fecha.tzinfo is None:
+            fecha = fecha.replace(tzinfo=UTC)
+        segundos = (fecha - datetime.now(UTC)).total_seconds()
+
+    if not math.isfinite(segundos):
+        return None
+    return min(max(segundos, 0.0), config.retry_after_maximo_s)
+
+
+def resolver(
+    cliente,
+    id_cuenta: str,
+    config: ReintentosConfig,
+    sleep=time.sleep,
+    uniform=random.uniform,
+) -> Resultado:
+    for intento in range(1, config.max_intentos + 1):
+        retry_after = None
+        try:
+            respuesta = cliente.obtener(id_cuenta)
+        except requests.exceptions.RequestException as error:
+            resultado, reintentar = clasificar_excepcion(error)
+        else:
+            resultado, reintentar = clasificar_respuesta(respuesta, id_cuenta)
+            if reintentar:
+                retry_after = _retry_after(respuesta, config)
+
+        hay_siguiente = reintentar and intento < config.max_intentos
+        espera = 0.0
+        if hay_siguiente:
+            espera = _espera(intento, config, uniform)
+            if retry_after is not None:
+                espera = retry_after
+
+        if resultado.estado is Estado.ERROR_TECNICO:
+            logger.warning(
+                "intento fallido id=%s intento=%d/%d causa=%s espera=%.2f",
+                id_cuenta,
+                intento,
+                config.max_intentos,
+                resultado.causa,
+                espera,
+            )
+
+        if not hay_siguiente:
+            return replace(resultado, intentos=intento)
+
+        sleep(espera)
+
+    raise AssertionError("el bucle de reintentos no terminó")
