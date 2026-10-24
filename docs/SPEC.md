@@ -33,7 +33,7 @@ Proceso de madrugada, sin supervisión: lee el CSV diario de cuentas médicas, c
 | R12 | Decisión sobre repetidos, documentada | 3.3 |
 | R13 | BITACORA.md | 15 |
 
-Fuera de alcance (va a «Pendiente y por qué» en el README): otros formatos de CSV (solo una columna `id_cuenta`; si cambia, falla con mensaje claro), concurrencia, cortacircuitos, bloqueo de instancia única, puertos y adaptadores formales, 404 transitorios, purga de datos viejos.
+Fuera de alcance (va a «Pendiente y por qué» en el README): otros formatos de CSV (solo una columna `id_cuenta`; si cambia, falla con mensaje claro), concurrencia, cortacircuitos, bloqueo de instancia única, puertos y adaptadores formales, 404 transitorios, identidad por contenido (un archivo idéntico conserva el hash, no se reconsulta y mantiene el nombre de la primera carga; la mejora sería incluir la fecha de recepción en la identidad) y purga de datos viejos.
 
 ## 2. Decisiones de diseño (resumen)
 
@@ -55,7 +55,7 @@ Fuera de alcance (va a «Pendiente y por qué» en el README): otros formatos de
 ### 3.1 Lectura (`adapters/csv_reader.py`)
 
 - Leer los bytes y calcular SHA-256: `archivo_hash` (64 hex) y `hash8` (los 8 primeros).
-- Decodificar con `utf-8-sig`. Si no decodifica: error fatal (salida 2); no adivinar la codificación.
+- Decodificar con `entrada.codificacion` (`utf-8-sig` por defecto). Si no decodifica: error fatal (salida 2); no adivinar la codificación.
 - Parsear con `csv.reader`. La primera línea es el encabezado y, tras `strip()`, debe contener la columna configurada (`id_cuenta`). Si falta: error fatal (salida 2).
 - `linea_origen` = `reader.line_num` (la del encabezado es la 1).
 
@@ -150,7 +150,8 @@ CREATE TABLE IF NOT EXISTS resultados (
 
 ```
 src/cuentas_pipeline/
-├── cli.py                 # argparse, lee el TOML, crea las piezas, sys.exit
+├── cli.py                 # argparse, lee el TOML, crea las piezas y devuelve el código de salida
+├── __main__.py            # llama a `cli.main` y ejecuta `sys.exit`
 ├── logging_setup.py
 ├── pipeline.py            # orquestador; recibe repo, cliente y escritor como parámetros
 ├── core/
@@ -167,7 +168,7 @@ src/cuentas_pipeline/
     └── excel_writer.py
 ```
 
-Reglas de importación: `core` no importa nada del proyecto; `steps` y `adapters` solo `core`; `pipeline` solo `core` y `steps`; `cli` puede importar todo. `cli.py` lee el TOML con `tomllib` y construye las dataclasses. Cada componente recibe solo su sección de configuración.
+Reglas de importación: `core` no importa nada del proyecto; `steps` y `adapters` solo `core`; `pipeline` solo `core` y `steps`; `cli` puede importar todo. `cli.py` lee el TOML con `tomllib`, construye las dataclasses y devuelve el código de salida; `__main__.py` llama a `sys.exit(main())`. Cada componente recibe solo su sección de configuración, con una excepción conocida: `pipeline.ejecutar` recibe la `Config` completa. Es una desviación respecto a la regla de bajo acoplamiento; la mejora futura es que reciba solo las secciones que necesita.
 
 Dónde cambiar qué (cambios en vivo): política de repetidos → `normalize.py`; qué se reintenta y la espera → `resolve.py`; columnas y colores del Excel → `excel_writer.py`; parámetros → `config.toml`; códigos de salida → `cli.py`; texto del resumen → `summary.py`.
 
@@ -217,7 +218,7 @@ Valores por defecto en dataclasses inmutables; el TOML los sobreescribe; se vali
 ## 10. Logging (`logging_setup.py`)
 
 - `logging` estándar: `RotatingFileHandler` más consola. Formato de texto: marca de tiempo, nivel, módulo y mensaje con pares `clave=valor` (`id=42 estado=OK intentos=1`).
-- INFO: inicio (archivo, `hash8`, config), resultado de cada id, resumen final. WARNING: cada intento fallido y avisos de entrada. ERROR: cada id que termina en `ERROR_TECNICO` y los errores fatales (con traceback).
+- INFO: inicio (archivo, `hash8`, ruta del config y `url_base`), resultado de cada id, resumen final. WARNING: cada intento fallido y avisos de entrada. ERROR: cada id que termina en `ERROR_TECNICO` y los errores fatales (con traceback). La configuración completa se registra en DEBUG.
 - Nunca se registran cuerpos de respuesta: son datos de cuentas médicas. Solo id, estado, causa e intentos.
 
 ## 11. Flujo, resumen y códigos de salida
@@ -234,19 +235,19 @@ Flujo de `pipeline.py` (secuencial):
 8. Construir el resumen y mostrarlo en consola y log.
 9. Calcular el código de salida.
 
-Resumen de la ejecución (consola y log, misma plantilla): archivo y hash; entrada (líneas con datos, en blanco, repeticiones ignoradas con sus ids y conteos, ids únicos); resultado por estado; errores técnicos por causa; solo esta ejecución (consultados, reutilizados, reintentos totales, duración); ruta del Excel.
+Resumen de la ejecución (consola y log, misma plantilla): archivo y `hash8`; el Excel muestra el hash completo. Incluye entrada (líneas con datos, en blanco, repeticiones ignoradas con sus ids y conteos, ids únicos); resultado por estado; errores técnicos por causa; solo esta ejecución (consultados, reutilizados, reintentos totales, duración); ruta del Excel.
 
 | Salida | Significado |
 | --- | --- |
 | 0 | Terminó y no queda nada por resolver (NO\_ENCONTRADO y DATO\_INVALIDO son resultados de negocio) |
 | 1 | Terminó, pero quedan `ERROR_TECNICO` o `PENDIENTE`; el Excel se genera completo, con esas filas incluidas, y conviene relanzar |
-| 2 | Fallo fatal: configuración inválida, CSV ausente o ilegible, columna ausente, error de base de datos o del Excel |
+| 2 | Fallo fatal: configuración inválida, CSV ausente o ilegible, columna ausente, error de base de datos o del Excel, o cualquier excepción no controlada |
 
-`cli.py` captura `Exception` en el nivel superior, registra el traceback y sale con 2. Interfaz: `python -m cuentas_pipeline --input ruta/cuentas.csv [--config config.toml]`.
+`cli.py` captura `Exception` en el nivel superior, registra el traceback y devuelve 2. `__main__.py` llama a `sys.exit(main())`. Interfaz: `python -m cuentas_pipeline --input ruta/cuentas.csv [--config config.toml]`.
 
 ## 12. Pruebas mínimas (`pytest`)
 
-- `test_normalize.py`: el CSV del reto produce los ids únicos esperados, con `apariciones` correctas, `  23 ` y `"42"` limpios, línea en blanco ignorada y `abc` como `DATO_INVALIDO`.
+- `test_normalize.py`: el CSV del reto produce los ids únicos esperados, con `apariciones` correctas; conserva `valor_original` tal como llega (para la línea ` 23`, el valor es `" 23"`) y solo normaliza el id a `23`; el parser quita las comillas de `"42"`; línea en blanco ignorada y `abc` como `DATO_INVALIDO`.
 - `test_resolve.py` (cliente falso, `sleep` registrado): un 404 se resuelve en un solo intento; un 500 seguido de 200 termina en `OK`; un 429 respeta `Retry-After`; un timeout repetido agota los intentos y queda en `ERROR_TECNICO`; la espera crece y respeta el techo.
 - `test_pipeline.py` (SQLite en carpeta temporal y cliente falso): una segunda ejecución hace cero llamadas; los `ERROR_TECNICO` se reintentan al relanzar; una excepción inesperada en un id no detiene a los demás; el Excel tiene una fila por id único; una celda con texto que empieza por `=` queda como texto.
 
