@@ -100,6 +100,15 @@ def test_otros_4xx_no_reintentan(codigo):
     assert not reintentar
 
 
+@pytest.mark.parametrize("codigo", [100, 204, 301, 304])
+def test_codigos_fuera_de_la_tabla_son_error_inesperado_sin_reintento(codigo):
+    resultado, reintentar = clasificar_respuesta(RespuestaFalsa(codigo), "42")
+
+    assert resultado.causa is Causa.ERROR_INESPERADO
+    assert str(codigo) in resultado.detalle_error
+    assert not reintentar
+
+
 def test_timeout_es_error_tecnico_y_reintenta():
     resultado, reintentar = clasificar_excepcion(requests.exceptions.Timeout("tarde"))
 

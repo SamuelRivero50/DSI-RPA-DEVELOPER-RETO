@@ -69,7 +69,7 @@ def clasificar_respuesta(respuesta: requests.Response, id_esperado: str) -> tupl
     if 400 <= estado_http < 500:
         return _error(Causa.HTTP_4XX, f"HTTP {estado_http}", False)
 
-    return _error(Causa.HTTP_4XX, f"HTTP inesperado {estado_http}", False)
+    return _error(Causa.ERROR_INESPERADO, f"HTTP inesperado {estado_http}", False)
 
 
 def clasificar_excepcion(error: Exception) -> tuple[Resultado, bool]:
