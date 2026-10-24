@@ -103,8 +103,6 @@ El proceso es secuencial. La pausa configurada se aplica entre ids pendientes, n
 
 Se escribe siempre al final de la ejecución, aunque queden pendientes, en `salida/consolidado_<YYYY-MM-DD>_<hash8>.xlsx`. La fecha es la de la primera carga del archivo (`MIN(creado_en)`) y `hash8` son los primeros ocho caracteres del SHA-256 del contenido. El archivo se escribe en un temporal de la misma carpeta y se reemplaza con `os.replace`, de modo que nunca queda un Excel a medias.
 
-En Windows el Excel de destino debe estar cerrado al ejecutar. Si está abierto, `os.replace` no puede reemplazarlo: la ejecución termina con código `2` y el estado ya confirmado en SQLite no se pierde; al cerrarlo y relanzar se regenera el Excel (comportamiento esperado en Windows; no verificado en el entorno Linux de desarrollo).
-
 Hoja `Resultados`, una fila por id único y ordenada por línea de origen. El orden real de columnas y encabezados visibles es:
 
 | Orden | Encabezado visible | Contenido |
@@ -121,8 +119,6 @@ Hoja `Resultados`, una fila por id único y ordenada por línea de origen. El or
 | 10 | `ID usuario` | `userId` de la API. |
 | 11 | `Título` | `title` de la API. |
 | 12 | `Cuerpo` | `body` de la API, sin ajuste de línea. |
-
-Formato de `Resultados`: encabezado de altura 28 con banda oscura (`404040`), texto blanco en negrita, centrado y con ajuste de línea; autofiltro; anchos fijos 12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40 y 70; filas de datos de altura 20, alineación vertical centrada y sin ajuste de línea en `Título` ni `Cuerpo`. Las columnas `Línea origen`, `ID cuenta`, `Apariciones`, `Intentos` e `ID usuario` se centran y el resto queda a la izquierda. La celda `Estado` lleva el color de estado: verde claro para `OK`, amarillo para `NO_ENCONTRADO`, naranja para `DATO_INVALIDO`, rojo claro para `ERROR_TECNICO` y gris para `PENDIENTE`; las filas con estado distinto de `OK` llevan además un relleno suave de la misma familia, y las `OK` no llevan relleno de fila. Panel congelado en `D2`; impresión horizontal ajustada a una página de ancho con la fila 1 repetida; al abrir el archivo queda activa `Resultados`.
 
 Todo texto de origen externo se escribe como texto; si empieza por `=`, `+`, `-` o `@` se fuerza `cell.data_type = 's'` para evitar inyección de fórmulas.
 
@@ -223,7 +219,7 @@ Dos matices que conviene tener presentes:
 
 La identidad del archivo es su SHA-256. La primera carga inserta los ids con `INSERT OR IGNORE`; las siguientes ejecuciones solo procesan `PENDIENTE` y `ERROR_TECNICO`, y el Excel se regenera siempre desde la base. Relanzar es seguro: no se duplican filas ni se reconsulta lo ya resuelto. Cada id se confirma al terminar, así que un Ctrl+C o un corte dejan el estado consistente y la ejecución siguiente retoma donde quedó.
 
-**Supuesto:** se asume que el archivo de cada día tiene contenido distinto. Si llegara uno idéntico a otro ya procesado, tendría el mismo hash: no se reconsultaría nada y el Excel conservaría el nombre de la primera carga. Una mejora futura sería incluir la fecha de recepción en la identidad del archivo.
+**Supuesto:** se asume que el archivo de cada día tiene contenido distinto. Si llegara uno idéntico a otro ya procesado, tendría el mismo hash: no se reconsultaría nada y el Excel conservaría el nombre de la primera carga.
 
 ### 404 definitivo (supuesto)
 
@@ -271,7 +267,7 @@ Códigos de salida: `0` no queda nada pendiente; `1` quedan `ERROR_TECNICO` o `P
 | Salida 1 con `HTTP_4XX` | URL o petición mal configurada | Corregir la configuración antes de relanzar |
 | Salida 1 con `RESPUESTA_INVALIDA` | Proxy o cambio en la API | Revisar una respuesta a mano y escalar |
 | Salida 1 con `ERROR_INESPERADO` (o en el log) | Bug o respuesta HTTP fuera de la tabla | Guardar el traceback y escalar; el resto del Excel es válido |
-| Salida 2: el Excel no se genera | Archivo abierto, permisos o disco | Liberar el recurso y relanzar (se regenera desde la base) |
+| Salida 2: el Excel no se genera | Permisos o disco | Revisar permisos y espacio, y relanzar (se regenera desde la base) |
 | Ejecución mucho más larga de lo normal | API lenta | Dejar terminar, o cortar y relanzar |
 
 Reglas:
@@ -279,7 +275,6 @@ Reglas:
 - Relanzar siempre es seguro.
 - No editar el CSV a mano: cambia el hash y se reconsulta todo.
 - No borrar la base salvo último recurso: se reconsulta todo, sin corrupción.
-- Si el Excel está abierto en Windows, `os.replace` falla y la ejecución sale con `2`; la base ya está confirmada y se puede regenerar al liberar el archivo.
 
 Consultas SQLite útiles (sustituir `<hash>` por el valor del resumen):
 
@@ -315,7 +310,22 @@ WHERE archivo_hash = '<hash>' AND apariciones > 1
 ORDER BY apariciones DESC, id;
 ```
 
-Escalamiento: [CONTACTO]. Completar con el nombre, teléfono y correo del contacto de guardia o del dueño del proceso.
+Escalamiento (si los pasos anteriores no resuelven el problema). Los roles
+indican a quién avisar; la persona y el medio de contacto los define la
+organización al desplegar el proceso.
+
+La siguiente tabla es un supuesto, podría variar dependiente del contexto de la organización.
+
+| Situación | A quién avisar |
+|---|---|
+| El CSV no llegó, llegó vacío o cambió de formato | Responsable del envío en la clínica, o quien recibe el archivo |
+| La API externa no responde durante horas, o devuelve 4xx o respuestas inválidas de forma sostenida | Responsable del sistema externo (soporte del proveedor) |
+| `ERROR_INESPERADO` o una excepción no controlada (salida 2) | Dueño del proceso o equipo de desarrollo |
+| El programador de tareas no lanza el proceso, o faltan disco o permisos | Equipo de infraestructura u operaciones |
+| El Excel no está listo y auditoría lo necesita ya | Responsable de auditoría, para avisar del retraso (el Excel se regenera al relanzar) |
+
+Al escalar, adjunta el resumen de la ejecución, el código de salida y las
+últimas líneas de `logs/proceso.log`.
 
 ## Tests
 
@@ -341,12 +351,11 @@ Fuera de alcance en esta entrega:
 
 - Otros formatos de CSV. Solo se contempla una columna de identificadores localizada por el encabezado configurado; si la columna no aparece, el proceso falla con salida `2`. No se adivinan codificaciones ni delimitadores.
 - Concurrencia. El proceso es secuencial y no bloquea una segunda instancia; dos ejecuciones simultáneas pueden competir por la base y el Excel.
-- Cortacircuitos. Hoy cada id agota su propio ciclo; una mejora futura sería dejar de reintentar tras N fallos seguidos sin detener el resto de ids.
 - Bloqueo de instancia única. Evitaría que dos procesos compitan por la misma base y el mismo Excel.
 - Interfaces formales (ports y adapters). Las dependencias se inyectan como parámetros; no se usan `Protocol` ni clases abstractas.
 - 404 transitorios. Se asume la API estática; ver la decisión sobre el 404 definitivo.
 - Purga automática de datos viejos.
-- Identidad por contenido. La identidad actual es el SHA-256 del contenido: un archivo idéntico a otro ya procesado conservaría el hash, no reconsultaría nada y reutilizaría el nombre de la primera carga. Una mejora futura sería incluir la fecha de recepción en la identidad del archivo.
+- Identidad por contenido. La identidad actual es el SHA-256 del contenido: un archivo idéntico a otro ya procesado conservaría el hash, no reconsultaría nada y reutilizaría el nombre de la primera carga. Una posible mejora futura sería incluir la fecha de recepción en la identidad del archivo.
 
 Retención: los logs rotan, pero el Excel y la base de datos se acumulan. No hay limpieza automática; hay que definir una política de retención y archivado según las necesidades de auditoría y privacidad. Mientras no exista, revisar el espacio en disco y no borrar la base sin confirmar que se puede reconsultar todo.
 
