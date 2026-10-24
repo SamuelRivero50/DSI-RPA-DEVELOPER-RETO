@@ -52,8 +52,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         config = _cargar_config(args.config, args.archivo_entrada)
         configurar_logging(config.log)
-        logger.info(
-            "config entrada=%s api=%s reintentos=%s salida=%s log=%s",
+        logger.info("config ruta=%s url_base=%s", args.config, config.api.url_base)
+        logger.debug(
+            "config completa entrada=%s api=%s reintentos=%s salida=%s log=%s",
             config.entrada,
             config.api,
             config.reintentos,
