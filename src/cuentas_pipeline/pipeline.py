@@ -31,22 +31,31 @@ def _reutilizables_previas(filas: list[dict[str, object]]) -> int:
     return sum(1 for fila in filas if fila["estado"] in _ESTADOS_REUTILIZABLES)
 
 
+def _detalle_log(valor: str | None) -> str:
+    if not valor:
+        return "-"
+    return " ".join(str(valor).split())[:300]
+
+
 def _registrar_resultado(id_cuenta: str, resultado: Resultado) -> None:
+    detalle = _detalle_log(resultado.detalle_error)
     if resultado.estado is Estado.ERROR_TECNICO:
         logger.error(
-            "id=%s estado=%s causa=%s intentos=%d",
+            "id=%s estado=%s causa=%s intentos=%d detalle=%s",
             id_cuenta,
             resultado.estado.value,
             resultado.causa.value,
             resultado.intentos,
+            detalle,
         )
     else:
         logger.info(
-            "id=%s estado=%s causa=%s intentos=%d",
+            "id=%s estado=%s causa=%s intentos=%d detalle=%s",
             id_cuenta,
             resultado.estado.value,
             resultado.causa.value if resultado.causa is not None else "-",
             resultado.intentos,
+            detalle,
         )
 
 
@@ -76,7 +85,12 @@ def ejecutar(
         try:
             resultado = resolver(cliente, fila.id, config.reintentos, sleep=sleep)
         except Exception as error:
-            logger.exception("id=%s estado=ERROR_TECNICO causa=ERROR_INESPERADO", fila.id)
+            detalle = _detalle_log(f"{type(error).__name__}: {error}")
+            logger.exception(
+                "id=%s estado=ERROR_TECNICO causa=ERROR_INESPERADO detalle=%s",
+                fila.id,
+                detalle,
+            )
             resultado = Resultado(
                 estado=Estado.ERROR_TECNICO,
                 causa=Causa.ERROR_INESPERADO,

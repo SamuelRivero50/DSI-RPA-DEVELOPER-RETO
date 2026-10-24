@@ -25,6 +25,12 @@ def _id_coincide(recibido: object, esperado: str) -> bool:
         return False
 
 
+def _detalle_log(valor: str | None) -> str:
+    if not valor:
+        return "-"
+    return " ".join(str(valor).split())[:300]
+
+
 def clasificar_respuesta(respuesta: requests.Response, id_esperado: str) -> tuple[Resultado, bool]:
     estado_http = respuesta.status_code
 
@@ -121,15 +127,19 @@ def resolver(
 ) -> Resultado:
     for intento in range(1, config.max_intentos + 1):
         retry_after = None
+        inicio_peticion = time.monotonic()
         try:
             respuesta = cliente.obtener(id_cuenta)
         except requests.exceptions.RequestException as error:
             resultado, reintentar = clasificar_excepcion(error)
+            estado_http = None
         else:
+            estado_http = respuesta.status_code
             resultado, reintentar = clasificar_respuesta(respuesta, id_cuenta)
             if reintentar:
                 retry_after = _retry_after(respuesta, config)
 
+        duracion_ms = (time.monotonic() - inicio_peticion) * 1000
         hay_siguiente = reintentar and intento < config.max_intentos
         espera = 0.0
         if hay_siguiente:
@@ -137,13 +147,29 @@ def resolver(
             if retry_after is not None:
                 espera = retry_after
 
+        detalle = _detalle_log(resultado.detalle_error)
+        logger.info(
+            "peticion id=%s intento=%d/%d http=%s estado=%s causa=%s "
+            "detalle=%s espera=%.2f duracion_ms=%.0f",
+            id_cuenta,
+            intento,
+            config.max_intentos,
+            estado_http if estado_http is not None else "-",
+            resultado.estado.value,
+            resultado.causa.value if resultado.causa is not None else "-",
+            detalle,
+            espera,
+            duracion_ms,
+        )
+
         if resultado.estado is Estado.ERROR_TECNICO:
             logger.warning(
-                "intento fallido id=%s intento=%d/%d causa=%s espera=%.2f",
+                "intento fallido id=%s intento=%d/%d causa=%s detalle=%s espera=%.2f",
                 id_cuenta,
                 intento,
                 config.max_intentos,
                 resultado.causa,
+                detalle,
                 espera,
             )
 

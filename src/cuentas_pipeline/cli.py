@@ -8,12 +8,19 @@ from cuentas_pipeline.adapters.api_client import ApiClient
 from cuentas_pipeline.adapters.csv_reader import leer_csv
 from cuentas_pipeline.adapters.excel_writer import ExcelWriter
 from cuentas_pipeline.adapters.repository import Repositorio
-from cuentas_pipeline.core.config import ConfigInvalidaError, config_desde_dict
+from cuentas_pipeline.core.config import ConfigInvalidaError, LogConfig, config_desde_dict
 from cuentas_pipeline.core.models import Estado, ResumenEjecucion
 from cuentas_pipeline.logging_setup import configurar_logging
 from cuentas_pipeline.pipeline import ejecutar
 
 logger = logging.getLogger(__name__)
+
+
+def _configurar_log_de_emergencia() -> None:
+    try:
+        configurar_logging(LogConfig())
+    except Exception:
+        logging.basicConfig(level=logging.INFO)
 
 
 def _cargar_config(ruta: str, archivo_entrada: str | None):
@@ -50,7 +57,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _construir_parser().parse_args(argv)
 
     try:
-        config = _cargar_config(args.config, args.archivo_entrada)
+        try:
+            config = _cargar_config(args.config, args.archivo_entrada)
+        except Exception:
+            _configurar_log_de_emergencia()
+            raise
         configurar_logging(config.log)
         logger.info("config ruta=%s url_base=%s", args.config, config.api.url_base)
         logger.debug(
@@ -80,5 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("codigo_salida=%d", codigo)
         return codigo
     except Exception:
+        if not logging.getLogger().handlers:
+            _configurar_log_de_emergencia()
         logger.exception("error fatal")
         return 2

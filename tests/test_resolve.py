@@ -317,4 +317,20 @@ def test_registra_warning_por_intento_fallido(caplog):
     assert "id=42" in caplog.text
     assert "intento=1/4" in caplog.text
     assert "causa=HTTP_5XX" in caplog.text
+    assert "detalle=HTTP 500" in caplog.text
     assert "espera=1.00" in caplog.text
+
+
+def test_registra_una_linea_por_peticion(caplog):
+    cliente = ClienteFalso([RespuestaFalsa(500), RespuestaFalsa(200, {"id": 42})])
+
+    with caplog.at_level(logging.INFO, logger="cuentas_pipeline.steps.resolve"):
+        _resolver(cliente)
+
+    peticiones = [mensaje for mensaje in caplog.messages if mensaje.startswith("peticion ")]
+    assert len(peticiones) == 2
+    assert "peticion id=42 intento=1/4 http=500" in peticiones[0]
+    assert "estado=ERROR_TECNICO causa=HTTP_5XX detalle=HTTP 500" in peticiones[0]
+    assert "peticion id=42 intento=2/4 http=200" in peticiones[1]
+    assert "estado=OK causa=- detalle=-" in peticiones[1]
+    assert "duracion_ms=" in peticiones[0]

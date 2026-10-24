@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pytest
@@ -59,11 +60,25 @@ def test_toml_invalido_falla_con_mensaje_claro(tmp_path):
         _cargar_config(str(ruta), None)
 
 
-def test_main_sale_con_dos_si_no_puede_leer_la_configuracion(tmp_path, caplog):
-    codigo = main(["--config", str(tmp_path / "no.toml")])
+def test_main_sale_con_dos_si_no_puede_leer_la_configuracion(tmp_path, monkeypatch):
+    raiz = logging.getLogger()
+    handlers_previos = raiz.handlers[:]
+    nivel_previo = raiz.level
+    try:
+        monkeypatch.chdir(tmp_path)
+        codigo = main(["--config", str(tmp_path / "no.toml")])
 
-    assert codigo == 2
-    assert "error fatal" in caplog.text
+        assert codigo == 2
+        texto = (tmp_path / "logs" / "proceso.log").read_text(encoding="utf-8")
+        assert "error fatal" in texto
+        assert "FileNotFoundError" in texto
+    finally:
+        for handler in raiz.handlers[:]:
+            raiz.removeHandler(handler)
+            handler.close()
+        for handler in handlers_previos:
+            raiz.addHandler(handler)
+        raiz.setLevel(nivel_previo)
 
 
 def test_el_modulo_se_puede_ejecutar():
