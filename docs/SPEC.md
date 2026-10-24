@@ -2,6 +2,8 @@
 
 Prueba técnica RPA Developer (DSI Factory) · Documento para el agente de código · Decisiones validadas por el autor
 
+> **Nota de sincronización (2026-10-24):** Esta spec fue el punto de partida del diseño. Si algo difiere de la implementación, mandan el código y el README.
+
 ## 0. Reglas de trabajo para el agente
 
 - El código es del autor y deberá explicarlo y modificarlo en vivo en la entrevista. Escribe código simple, legible y pequeño, sin abstracciones que esta spec no pida.
@@ -100,12 +102,17 @@ Error inesperado: el procesamiento de cada id va envuelto en `try/except Excepti
 | `Timeout` | Sí | ERROR\_TECNICO | TIMEOUT |
 | `ConnectionError` | Sí | ERROR\_TECNICO | CONEXION |
 | Cualquier 5xx | Sí | ERROR\_TECNICO | HTTP\_5XX |
-| 429 | Sí, respeta `Retry-After` | ERROR\_TECNICO | HTTP\_429 |
+| 429 | Sí | ERROR\_TECNICO | HTTP\_429 |
 | 200 sin JSON válido o sin el id esperado | Sí | ERROR\_TECNICO | RESPUESTA\_INVALIDA |
 | Otros 4xx | No, dentro de la ejecución | ERROR\_TECNICO | HTTP\_4XX |
+| Código fuera de la tabla (1xx, 3xx, 2xx distinto de 200) | No | ERROR\_TECNICO | ERROR\_INESPERADO (`detalle_error` = `HTTP inesperado <código>`) |
 | Otra excepción de `requests` | No | ERROR\_TECNICO | ERROR\_INESPERADO |
 
-Frontera (para el README): se reintenta lo que puede cambiar al volver a preguntar (red, timeouts, 5xx, 429, respuestas corruptas). No se reintenta lo determinista dentro de la ejecución (404, datos inválidos, 4xx por petición mal formada). Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución.
+Un timeout de conexión (`ConnectTimeout`) se clasifica como `TIMEOUT`: `Timeout` se comprueba antes que `ConnectionError`.
+
+Frontera (para el README): se reintenta lo que puede cambiar al volver a preguntar (red, timeouts, 5xx, 429, respuestas corruptas). No se reintenta lo determinista dentro de la ejecución (404, datos inválidos, otros 4xx, códigos fuera de la tabla y errores inesperados). Todo `ERROR_TECNICO` se vuelve a intentar en la siguiente ejecución.
+
+`Retry-After` se respeta en cualquier respuesta reintentable, no solo en 429, tanto en segundos como en fecha HTTP. Si es inválido o negativo, se ignora y se usa la espera normal.
 
 Espera: `max_intentos` en total (por defecto 4: uno inicial y tres reintentos). Antes del intento siguiente, `tope = min(espera_maxima_s, espera_base_s * factor ** (n - 1))` y `espera = tope / 2 + random.uniform(0, tope / 2)` (jitter parcial: la espera siempre crece hasta el techo). Si llega `Retry-After` válido (segundos o fecha HTTP): `espera = min(retry_after, retry_after_maximo_s)`. `sleep` y `uniform` se inyectan como parámetros con valores por defecto, para que los tests no esperen.
 
@@ -168,10 +175,10 @@ Dónde cambiar qué (cambios en vivo): política de repetidos → `normalize.py`
 
 - Archivo: `consolidado_<YYYY-MM-DD>_<hash8>.xlsx` en `salida.carpeta`; la fecha es la de `MIN(creado_en)` del archivo de entrada.
 - Se genera siempre al final de la ejecución, desde la base (aunque queden pendientes). Se escribe en un archivo temporal de la misma carpeta y se renombra con `os.replace`.
-- Hoja `Resultados`, una fila por id, ordenada por `linea_origen`. Orden de columnas: `linea_origen`, `valor_original`, `id_cuenta` (entero si es válido, vacío si no), `estado`, `causa`, `apariciones`, `intentos`, `detalle_error`, `consultado_en` (= `actualizado_en`), `user_id`, `titulo`, `cuerpo`. Encabezados visibles: «Línea origen», «Valor original», «ID cuenta», «Estado», «Causa», «Apariciones», «Intentos», «Detalle del error», «Consultado en», «ID usuario», «Título» y «Cuerpo».
-- Formato: encabezado de altura 28 con banda oscura, texto blanco en negrita, centrado y con ajuste de línea; autofiltro; anchos fijos 12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40 y 70; filas de datos de altura 20 con alineación vertical centrada y sin ajuste de línea en Título ni Cuerpo. Columnas numéricas cortas centradas y el resto a la izquierda. La celda Estado lleva el color de estado; las filas con estado distinto de OK llevan un relleno suave de la misma familia, y las OK no llevan relleno de fila. «Consultado en» se muestra como `AAAA-MM-DD HH:MM:SS` sin T ni desfase. Panel congelado en D2; impresión horizontal ajustada a una página de ancho con la fila 1 repetida; al abrir el archivo queda activa `Resultados`. `valor_original` se escribe como texto aunque parezca número, para conservar el valor recibido.
+- Hoja `Resultados`, una fila por id único y ordenada por `linea_origen`. Orden real de columnas: `linea_origen`, `valor_original`, `id_cuenta` (entero si es válido, vacío en el Excel si no), `estado`, `causa`, `apariciones`, `intentos`, `detalle_error`, `consultado_en` (= `actualizado_en`), `user_id`, `titulo`, `cuerpo`. Encabezados visibles, en ese orden: «Línea origen», «Valor original», «ID cuenta», «Estado», «Causa», «Apariciones», «Intentos», «Detalle del error», «Consultado en», «ID usuario», «Título» y «Cuerpo».
+- Formato de `Resultados`: encabezado de altura 28 con banda oscura `404040`, texto blanco en negrita, centrado y con ajuste de línea; autofiltro; anchos fijos 12, 16, 11, 18, 22, 13, 10, 24, 20, 12, 40 y 70; filas de datos de altura 20 con alineación vertical centrada y sin ajuste de línea en Título ni Cuerpo. `Línea origen`, `ID cuenta`, `Apariciones`, `Intentos` e `ID usuario` se centran; el resto queda a la izquierda. La celda `Estado` lleva el color de estado (verde claro para OK, amarillo para NO\_ENCONTRADO, naranja para DATO\_INVALIDO, rojo claro para ERROR\_TECNICO y gris para PENDIENTE); las filas con estado distinto de OK llevan además un relleno suave de la misma familia, y las OK no llevan relleno de fila. `Consultado en` se muestra como `AAAA-MM-DD HH:MM:SS` en hora local, sin T ni zona; en SQLite se guarda ISO-8601 con zona. Panel congelado en `D2`; impresión horizontal ajustada a una página de ancho con la fila 1 repetida; al abrir el archivo queda activa `Resultados`. `valor_original` se escribe como texto aunque parezca número, para conservar el valor recibido.
 - Seguridad: todo texto de origen externo (CSV o API) se escribe como texto. Si empieza por `=`, `+`, `-` o `@`, se fuerza `cell.data_type = 's'` para que no se interprete como fórmula.
-- Hoja `Resumen` (estado del archivo, derivado de la base): archivo (nombre, hash, primera carga, generado en); entrada (líneas con datos, líneas en blanco ignoradas, repeticiones ignoradas, ids únicos); resultado por estado; errores técnicos por causa; lista de repetidos (id y apariciones).
+- Hoja `Resumen`: título «Resumen del archivo». Bloque Archivo (`Nombre`, `Hash`, `Primera carga`, `Generado en`); bloque Entrada (`Líneas con datos`, `Líneas en blanco ignoradas`, `Repeticiones ignoradas`, `Identificadores únicos`); tabla Resultado por estado (`Estado`/`Total` con los cinco estados y una fila `Total`); tabla Errores técnicos por causa (`Causa`/`Total`, o «Sin errores técnicos»); tabla Repetidos (`Id`/`Apariciones`, o «Sin repetidos»).
 
 ## 9. Configuración (`config.toml`)
 
@@ -221,7 +228,7 @@ Flujo de `pipeline.py` (secuencial):
 2. Leer el archivo, calcular el hash y parsear (3.1).
 3. Normalizar y deduplicar (3.2).
 4. Abrir el repositorio y `cargar_filas` en una transacción.
-5. Obtener `pendientes`; contar como «reutilizados» las filas ya finales.
+5. Obtener `pendientes`; contar como «reutilizados» los ids ya resueltos con la API en ejecuciones anteriores (`OK` y `NO_ENCONTRADO`). `DATO_INVALIDO` nunca se consulta y no cuenta.
 6. Para cada pendiente: resolver con reintentos (sección 5), `guardar` y commit; pausa configurable entre consultas. Excepción inesperada: sección 4.
 7. Generar el Excel desde la base (siempre).
 8. Construir el resumen y mostrarlo en consola y log.
@@ -232,7 +239,7 @@ Resumen de la ejecución (consola y log, misma plantilla): archivo y hash; entra
 | Salida | Significado |
 | --- | --- |
 | 0 | Terminó y no queda nada por resolver (NO\_ENCONTRADO y DATO\_INVALIDO son resultados de negocio) |
-| 1 | Terminó, pero quedan `ERROR_TECNICO` o `PENDIENTE`; el Excel está incompleto, conviene relanzar |
+| 1 | Terminó, pero quedan `ERROR_TECNICO` o `PENDIENTE`; el Excel se genera completo, con esas filas incluidas, y conviene relanzar |
 | 2 | Fallo fatal: configuración inválida, CSV ausente o ilegible, columna ausente, error de base de datos o del Excel |
 
 `cli.py` captura `Exception` en el nivel superior, registra el traceback y sale con 2. Interfaz: `python -m cuentas_pipeline --input ruta/cuentas.csv [--config config.toml]`.
@@ -288,7 +295,7 @@ Instrucción al agente: detente para revisión solo después de los commits 6, 9
 
 ## 14. README y runbook
 
-Contenido obligatorio: 1) qué hace, con el flujo en una línea y un enlace a `BITACORA.md`; 2) requisitos; 3) instalación; 4) tabla de configuración con significado y valores por defecto; 5) ejecución, con ejemplo de cron y del Programador de tareas; 6) salidas: columnas del Excel, base de datos, log y códigos de salida; 7) decisiones de diseño, empezando por los repetidos (3.3), y luego la frontera de reintentos (sección 5), idempotencia y reanudación, el 404 definitivo, la ausencia de cortacircuitos y el log sin cuerpos; 8) runbook; 9) «Pendiente y por qué» (lo fuera de alcance de la sección 1, retención de archivos y los límites conocidos); 10) cómo correr los tests.
+Contenido obligatorio: 1) qué hace, con el flujo en una línea y un enlace a `BITACORA.md`; 2) requisitos; 3) instalación; 4) tabla de configuración con significado y valores por defecto; 5) ejecución, con ejemplo de cron y del Programador de tareas; 6) salidas: columnas del Excel, base de datos, log y códigos de salida; 7) decisiones de diseño, empezando por los repetidos (3.3), y luego la frontera de reintentos (sección 5), idempotencia y reanudación, el 404 definitivo, la ausencia de cortacircuitos y el log sin cuerpos; 8) runbook; 9) cómo correr los tests; 10) «Pendiente y por qué» (lo fuera de alcance de la sección 1, retención de archivos y los límites conocidos), que es la última sección.
 
 Runbook de las 3 a.m. Primeros cinco minutos: mirar el código de salida y las últimas líneas del log (resumen final).
 
