@@ -69,6 +69,116 @@ def _proteger_texto(celda) -> None:
         celda.data_type = "s"
 
 
+def _escribir_celda(hoja, fila: int, columna: int, valor, negrita: bool = False):
+    celda = hoja.cell(row=fila, column=columna, value=valor)
+    if negrita:
+        celda.font = Font(bold=True)
+    _proteger_texto(celda)
+    return celda
+
+
+def _primera_carga(filas: list[dict[str, object]]) -> str:
+    fechas = [str(fila["creado_en"]) for fila in filas if fila.get("creado_en")]
+    return min(fechas) if fechas else ""
+
+
+def _conteos_por_estado(filas: list[dict[str, object]]) -> dict[str, int]:
+    conteos = {estado.value: 0 for estado in Estado}
+    for fila in filas:
+        conteos[str(fila["estado"])] += 1
+    return conteos
+
+
+def _conteos_por_causa(filas: list[dict[str, object]]) -> dict[str, int]:
+    conteos: dict[str, int] = {}
+    for fila in filas:
+        if fila["estado"] != Estado.ERROR_TECNICO.value or not fila["causa"]:
+            continue
+        causa = str(fila["causa"])
+        conteos[causa] = conteos.get(causa, 0) + 1
+    return dict(sorted(conteos.items()))
+
+
+def _escribir_resumen(
+    libro,
+    archivo_nombre: str,
+    archivo_hash: str,
+    normalizacion,
+    filas: list[dict[str, object]],
+    generado_en: str,
+) -> None:
+    hoja = libro.create_sheet("Resumen")
+    hoja.column_dimensions["A"].width = 34
+    hoja.column_dimensions["B"].width = 70
+    fila = 1
+
+    _escribir_celda(hoja, fila, 1, "Archivo", True)
+    fila += 1
+    for etiqueta, valor in [
+        ("nombre", archivo_nombre),
+        ("hash", archivo_hash),
+        ("primera carga", _primera_carga(filas)),
+        ("generado en", generado_en),
+    ]:
+        _escribir_celda(hoja, fila, 1, etiqueta)
+        _escribir_celda(hoja, fila, 2, valor)
+        fila += 1
+
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "Entrada", True)
+    fila += 1
+    for etiqueta, valor in [
+        ("lineas con datos", normalizacion.lineas_con_datos),
+        ("lineas en blanco ignoradas", normalizacion.lineas_en_blanco),
+        ("repeticiones ignoradas", normalizacion.repeticiones_ignoradas),
+        ("ids unicos", len(normalizacion.filas)),
+    ]:
+        _escribir_celda(hoja, fila, 1, etiqueta)
+        _escribir_celda(hoja, fila, 2, valor)
+        fila += 1
+
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "Resultado por estado", True)
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "estado", True)
+    _escribir_celda(hoja, fila, 2, "total", True)
+    fila += 1
+    for estado, total in _conteos_por_estado(filas).items():
+        _escribir_celda(hoja, fila, 1, estado)
+        _escribir_celda(hoja, fila, 2, total)
+        fila += 1
+
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "Errores tecnicos por causa", True)
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "causa", True)
+    _escribir_celda(hoja, fila, 2, "total", True)
+    fila += 1
+    errores = _conteos_por_causa(filas)
+    if errores:
+        for causa, total in errores.items():
+            _escribir_celda(hoja, fila, 1, causa)
+            _escribir_celda(hoja, fila, 2, total)
+            fila += 1
+    else:
+        _escribir_celda(hoja, fila, 1, "ninguno")
+        fila += 1
+
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "Repetidos", True)
+    fila += 1
+    _escribir_celda(hoja, fila, 1, "id", True)
+    _escribir_celda(hoja, fila, 2, "apariciones", True)
+    fila += 1
+    if normalizacion.repetidos:
+        for id_cuenta, apariciones in normalizacion.repetidos:
+            _escribir_celda(hoja, fila, 1, id_cuenta)
+            _escribir_celda(hoja, fila, 2, apariciones)
+            fila += 1
+    else:
+        _escribir_celda(hoja, fila, 1, "ninguno")
+
+
 class ExcelWriter:
     def __init__(self, config: SalidaConfig):
         self._carpeta = Path(config.carpeta)
@@ -119,6 +229,15 @@ class ExcelWriter:
 
             hoja.freeze_panes = "A2"
             hoja.auto_filter.ref = f"A1:L{hoja.max_row}"
+
+            _escribir_resumen(
+                libro,
+                archivo_nombre,
+                archivo_hash,
+                normalizacion,
+                filas,
+                datetime.now().astimezone().isoformat(timespec="seconds"),
+            )
 
             libro.save(temporal)
             os.replace(temporal, ruta)

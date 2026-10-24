@@ -54,6 +54,13 @@ def _config(tmp_path, max_intentos=4):
     )
 
 
+def _valor_resumen(hoja, etiqueta):
+    for fila in hoja.iter_rows(values_only=True):
+        if fila[0] == etiqueta:
+            return fila[1]
+    raise AssertionError(f"no está {etiqueta!r} en la hoja Resumen")
+
+
 def _respuesta_ok(id_cuenta):
     valor = int(id_cuenta)
     return RespuestaFalsa(
@@ -270,7 +277,8 @@ def test_el_excel_tiene_una_fila_por_id_unico(tmp_path):
     assert resumen.ruta_excel.name.endswith(f"_{lectura.hash8}.xlsx")
     assert list(Path(config.salida.carpeta).glob(".consolidado_*")) == []
 
-    hoja = load_workbook(resumen.ruta_excel)["Resultados"]
+    libro = load_workbook(resumen.ruta_excel)
+    hoja = libro["Resultados"]
     assert hoja.max_row == 18
     assert hoja.max_column == 12
     assert [celda.value for celda in hoja[1]] == [
@@ -300,6 +308,21 @@ def test_el_excel_tiene_una_fila_por_id_unico(tmp_path):
     assert por_id[None][1].value == "abc"
     assert por_id[None][2].value is None
     assert por_id[None][3].value == "DATO_INVALIDO"
+
+    resumen_hoja = libro["Resumen"]
+    assert _valor_resumen(resumen_hoja, "nombre") == "cuentas.csv"
+    assert _valor_resumen(resumen_hoja, "hash") == lectura.archivo_hash
+    assert _valor_resumen(resumen_hoja, "primera carga")
+    assert _valor_resumen(resumen_hoja, "generado en")
+    assert _valor_resumen(resumen_hoja, "lineas con datos") == 20
+    assert _valor_resumen(resumen_hoja, "lineas en blanco ignoradas") == 1
+    assert _valor_resumen(resumen_hoja, "repeticiones ignoradas") == 3
+    assert _valor_resumen(resumen_hoja, "ids unicos") == 17
+    assert _valor_resumen(resumen_hoja, "OK") == 13
+    assert _valor_resumen(resumen_hoja, "NO_ENCONTRADO") == 3
+    assert _valor_resumen(resumen_hoja, "DATO_INVALIDO") == 1
+    assert _valor_resumen(resumen_hoja, "7") == 3
+    assert _valor_resumen(resumen_hoja, "12") == 2
     repo.cerrar()
 
 
@@ -352,7 +375,8 @@ def test_el_excel_tiene_formato_y_color_por_estado(tmp_path):
         sleep=lambda _segundos: None,
     )
 
-    hoja = load_workbook(resumen.ruta_excel)["Resultados"]
+    libro = load_workbook(resumen.ruta_excel)
+    hoja = libro["Resultados"]
     assert hoja.freeze_panes == "A2"
     assert hoja.auto_filter.ref == f"A1:L{hoja.max_row}"
     assert hoja["A1"].font.bold
@@ -362,4 +386,5 @@ def test_el_excel_tiene_formato_y_color_por_estado(tmp_path):
     assert por_id[101][0].fill.fgColor.rgb.endswith("FFEB9C")
     assert por_id[8][0].fill.fgColor.rgb.endswith("FFC7CE")
     assert por_id[None][0].fill.fgColor.rgb.endswith("F8CBAD")
+    assert _valor_resumen(libro["Resumen"], "ERROR_INESPERADO") == 1
     repo.cerrar()
